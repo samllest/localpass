@@ -1,0 +1,28 @@
+{
+  "version": "2.0",
+  "project_path": "C:\\Users\\35320\\.gemini\\antigravity\\scratch\\localpass",
+  "entries": [
+    {
+      "id": "f2e01b72-f746-46d5-b8d3-5f9d837de391",
+      "content": "acemcp 代码索引已启用 - 配置摘要: 文件扩展名=[\".py\", \".js\", \".ts\", \".jsx\", \".tsx\", \".java\", \".go\", \".rs\", \".cpp\", \".c\", \".h\", \".hpp\", \".cs\", \".rb\", \".php\", \".md\", \".txt\", \".json\", \".yaml\", \".yml\", \".toml\", \".xml\", \".html\", \".css\", \".scss\", \".sql\", \".sh\", \".bash\"], 排除模式=[\"node_modules\", \".git\", \"target\", \"dist\"], 批次大小=10, 最大行数/块=1600",
+      "content_normalized": "acemcp 代码索引已启用 - 配置摘要 文件扩展名=py js ts jsx tsx java go rs cpp c h hpp cs rb php md txt json yaml yml toml xml html css scss sql sh bash 排除模式=node_modules git target dist 批次大小=10 最大行数/块=1600",
+      "category": "Context",
+      "created_at": "2026-03-30T07:12:54.389497900Z",
+      "updated_at": "2026-03-30T07:12:54.389497900Z"
+    },
+    {
+      "id": "2886bf96-3ed3-43af-89cf-9dc31db2f0e5",
+      "content": "不生成总结性Markdown文档；不生成测试脚本；不主动编译（用户自己编译）；需帮用户运行程序；积极使用 sou 搜索代码并查看上下文；积极使用 context7 查询最新文档。",
+      "content_normalized": "不生成总结性markdown文档不生成测试脚本不主动编译用户自己编译需帮用户运行程序积极使用 sou 搜索代码并查看上下文积极使用 context7 查询最新文档",
+      "category": "Preference",
+      "created_at": "2026-03-30T07:20:17.150152Z",
+      "updated_at": "2026-03-30T07:20:17.150152Z"
+    }
+  ],
+  "last_dedup_at": "2026-03-30T07:12:41.574426900Z",
+  "config": {
+    "similarity_threshold": 0.7,
+    "dedup_on_startup": true,
+    "enable_dedup": true
+  }
+}

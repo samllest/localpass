@@ -1,0 +1,7 @@
+{
+  "name": "com.localpass.app",
+  "description": "LocalPass Node Host - Native Messaging Bridge",
+  "path": "C:\\Users\\35320\\.gemini\\antigravity\\scratch\\localpass\\native-messaging\\host.bat",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://pkcfknloifkpnibodpmjhoaeagchbnnd/"]
+}
