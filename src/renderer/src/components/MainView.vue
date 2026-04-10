@@ -79,7 +79,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import PasswordCard from './PasswordCard.vue'
 import AddEditModal from './AddEditModal.vue'
 
@@ -89,6 +89,9 @@ const filter = ref('all')
 const modalVisible = ref(false)
 const editingItem = ref(null)
 const toast = ref({ visible: false, msg: '', type: 'success' })
+let searchTimer = null
+let refreshToken = 0
+let stopRefreshListener = null
 
 const filtered = computed(() => {
   return apps.value.filter((a) => {
@@ -97,21 +100,30 @@ const filtered = computed(() => {
   })
 })
 
-async function load() {
-  apps.value = await window.localpass.listApps()
+async function refreshApps() {
+  const activeQuery = searchQuery.value.trim()
+  const currentToken = ++refreshToken
+  const nextApps = activeQuery
+    ? await window.localpass.searchApps(activeQuery)
+    : await window.localpass.listApps()
+
+  if (currentToken === refreshToken) {
+    apps.value = nextApps
+  }
 }
 
-async function onSearch() {
-  if (!searchQuery.value.trim()) {
-    apps.value = await window.localpass.listApps()
-  } else {
-    apps.value = await window.localpass.searchApps(searchQuery.value)
+function onSearch() {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
   }
+  searchTimer = setTimeout(() => {
+    refreshApps()
+  }, 180)
 }
 
 function clearSearch() {
   searchQuery.value = ''
-  load()
+  refreshApps()
 }
 
 function openAdd() {
@@ -127,18 +139,24 @@ function openEdit(item) {
 async function onDelete(id) {
   await window.localpass.deleteApp(id)
   showToast('已删除', 'error')
-  load()
+  refreshApps()
 }
 
 async function onCopy(text) {
-  await window.localpass.copyToClipboard(text)
-  showToast('已复制！30 秒后自动清除剪贴板', 'success')
+  const content = text == null ? '' : String(text)
+  if (!content) {
+    showToast('当前字段为空，无法复制', 'error')
+    return
+  }
+
+  await window.localpass.copyToClipboard(content)
+  showToast('已复制，30 秒后若未变化会自动清除', 'success')
 }
 
 function onSaved() {
   modalVisible.value = false
   showToast('保存成功', 'success')
-  load()
+  refreshApps()
 }
 
 async function lock() {
@@ -152,10 +170,22 @@ function showToast(msg, type = 'success') {
 }
 
 onMounted(() => {
-  load()
-  window.localpass.onRefreshList(() => {
-    load()
-    showToast('已录入一条新数据（来白网页自动捕获）', 'success')
+  refreshApps()
+  stopRefreshListener = window.localpass.onRefreshList(() => {
+    refreshApps()
+    showToast('已录入一条新数据（来自网页自动捕获）', 'success')
   })
+})
+
+onBeforeUnmount(() => {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+
+  if (typeof stopRefreshListener === 'function') {
+    stopRefreshListener()
+    stopRefreshListener = null
+  }
 })
 </script>

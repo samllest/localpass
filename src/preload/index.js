@@ -16,12 +16,17 @@ const api = {
   listApps: () => ipcRenderer.invoke('app:list'),
   searchApps: (query) => ipcRenderer.invoke('app:search', query),
   createApp: (data) => ipcRenderer.invoke('app:create', data),
-  updateCredential: (data) => ipcRenderer.invoke('app:update', data),
+  updateApp: (data) => ipcRenderer.invoke('app:update', data),
+  updateCredential: (data) => ipcRenderer.invoke('app:updateCredential', data),
   deleteApp: (id) => ipcRenderer.invoke('app:delete', id),
   getHistory: (id) => ipcRenderer.invoke('app:history', id),
   copyToClipboard: (text) => ipcRenderer.invoke('app:copy', text),
   clearMasterKey: () => ipcRenderer.invoke('app:clearMasterKey'),
-  onRefreshList: (callback) => ipcRenderer.on('app:refreshList', (_event, ...args) => callback(...args))
+  onRefreshList: (callback) => {
+    const listener = (_event, ...args) => callback(...args)
+    ipcRenderer.on('app:refreshList', listener)
+    return () => ipcRenderer.removeListener('app:refreshList', listener)
+  }
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

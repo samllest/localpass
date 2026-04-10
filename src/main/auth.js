@@ -6,6 +6,10 @@ import { getDbDir } from './storage'
 
 let systemDb = null
 
+function normalizeUsername(value) {
+  return value == null ? '' : String(value).trim()
+}
+
 export function initSystemDb() {
   if (systemDb) return
 
@@ -31,13 +35,24 @@ function hashPassword(password, salt) {
 export function registerUser(username, password) {
   if (!systemDb) initSystemDb()
 
-  const checkUser = systemDb.prepare('SELECT username FROM users WHERE username = ?').get(username)
+  const normalizedUsername = normalizeUsername(username)
+  const normalizedPassword = password == null ? '' : String(password)
+  if (!normalizedUsername) {
+    return { success: false, error: 'Username is required' }
+  }
+  if (!normalizedPassword) {
+    return { success: false, error: 'Password is required' }
+  }
+
+  const checkUser = systemDb
+    .prepare('SELECT username FROM users WHERE username = ?')
+    .get(normalizedUsername)
   if (checkUser) {
     return { success: false, error: 'User already exists' }
   }
 
   const salt = randomBytes(16).toString('hex')
-  const hash = hashPassword(password, salt)
+  const hash = hashPassword(normalizedPassword, salt)
   const userId = randomUUID()
   const dbFilename = `user_${userId}.db`
 
@@ -45,9 +60,9 @@ export function registerUser(username, password) {
     systemDb.prepare(`
       INSERT INTO users (id, username, master_password_hash, salt, db_filename)
       VALUES (?, ?, ?, ?, ?)
-    `).run(userId, username, hash, salt, dbFilename)
+    `).run(userId, normalizedUsername, hash, salt, dbFilename)
 
-    return { success: true, userId, username, dbFilename, salt }
+    return { success: true, userId, username: normalizedUsername, dbFilename, salt }
   } catch (error) {
     return { success: false, error: error.message }
   }
@@ -56,12 +71,21 @@ export function registerUser(username, password) {
 export function loginUser(username, password) {
   if (!systemDb) initSystemDb()
 
-  const user = systemDb.prepare('SELECT * FROM users WHERE username = ?').get(username)
+  const normalizedUsername = normalizeUsername(username)
+  const normalizedPassword = password == null ? '' : String(password)
+  if (!normalizedUsername) {
+    return { success: false, error: 'Username is required' }
+  }
+  if (!normalizedPassword) {
+    return { success: false, error: 'Password is required' }
+  }
+
+  const user = systemDb.prepare('SELECT * FROM users WHERE username = ?').get(normalizedUsername)
   if (!user) {
     return { success: false, error: 'User not found' }
   }
 
-  const hash = hashPassword(password, user.salt)
+  const hash = hashPassword(normalizedPassword, user.salt)
   if (hash !== user.master_password_hash) {
     return { success: false, error: 'Invalid password' }
   }
@@ -69,7 +93,7 @@ export function loginUser(username, password) {
   return {
     success: true,
     userId: user.id,
-    username,
+    username: normalizedUsername,
     dbFilename: user.db_filename,
     salt: user.salt
   }

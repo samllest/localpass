@@ -8,6 +8,7 @@ import {
   listApps,
   searchApps,
   createApp,
+  updateApp,
   updateCredential,
   deleteApp,
   clearMasterKey,
@@ -18,6 +19,7 @@ import {
 import { initBridgeServer } from './bridge'
 
 let mainWindow
+let clipboardClearTimer = null
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -80,11 +82,27 @@ app.whenReady().then(() => {
   ipcMain.handle('app:list', () => listApps())
   ipcMain.handle('app:search', (_, query) => searchApps(query))
   ipcMain.handle('app:create', (_, data) => createApp(data))
-  ipcMain.handle('app:update', (_, data) => updateCredential(data))
+  ipcMain.handle('app:update', (_, data) => updateApp(data))
+  ipcMain.handle('app:updateCredential', (_, data) => updateCredential(data))
   ipcMain.handle('app:delete', (_, id) => deleteApp(id))
   ipcMain.handle('app:history', (_, id) => getHistory(id))
   ipcMain.handle('app:copy', (_, text) => {
-    clipboard.writeText(text)
+    const copiedText = text == null ? '' : String(text)
+    clipboard.writeText(copiedText)
+
+    if (clipboardClearTimer) {
+      clearTimeout(clipboardClearTimer)
+      clipboardClearTimer = null
+    }
+
+    clipboardClearTimer = setTimeout(() => {
+      if (clipboard.readText() === copiedText) {
+        clipboard.clear()
+      }
+      clipboardClearTimer = null
+    }, 30_000)
+
+    return true
   })
   ipcMain.handle('app:clearMasterKey', () => {
     clearMasterKey()

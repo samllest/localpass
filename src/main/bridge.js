@@ -1,9 +1,14 @@
-﻿import { createServer } from 'http'
+import { createServer } from 'http'
 
 import { createApp, findAppByIdentity, isVaultUnlocked, updateCredential } from './db.js'
 
 let webContents = null
 let server = null
+const MAX_CAPTURE_BODY_BYTES = 32 * 1024
+
+function normalizeField(value) {
+  return value == null ? '' : String(value).trim()
+}
 
 export function initBridgeServer(winWebContents) {
   webContents = winWebContents
@@ -31,7 +36,15 @@ export function initBridgeServer(winWebContents) {
     }
 
     let body = ''
+    let bodyBytes = 0
     req.on('data', (chunk) => {
+      bodyBytes += chunk.length
+      if (bodyBytes > MAX_CAPTURE_BODY_BYTES) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'Payload too large' }))
+        req.destroy()
+        return
+      }
       body += chunk.toString()
     })
 
@@ -43,30 +56,35 @@ export function initBridgeServer(winWebContents) {
           return
         }
 
-        const payload = JSON.parse(body)
-        if (!payload.identity || !payload.password) {
+        const payload = JSON.parse(body || '{}')
+        const identity = normalizeField(payload.identity)
+        const password = normalizeField(payload.password)
+        const username = normalizeField(payload.username) || null
+        const displayName = normalizeField(payload.display_name) || identity
+
+        if (!identity || !password) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'Invalid payload' }))
           return
         }
 
-        const existing = findAppByIdentity(payload.identity)
+        const existing = findAppByIdentity(identity)
         let changed = false
 
         if (existing) {
           const result = updateCredential({
             app_id: existing.id,
-            username: payload.username,
-            password: payload.password
+            username,
+            password
           })
           changed = result.updated
         } else {
           createApp({
-            identity: payload.identity,
-            display_name: payload.display_name || payload.identity,
+            identity,
+            display_name: displayName,
             category: 'web',
-            username: payload.username,
-            password: payload.password
+            username,
+            password
           })
           changed = true
         }

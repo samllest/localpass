@@ -3,7 +3,7 @@
     <div class="unlock-card">
       <div class="unlock-logo">🔐</div>
       <h1 class="unlock-title">LocalPass</h1>
-      <p class="unlock-sub">{{ isRegister ? '注册新的独立云端密码库' : '登录并解锁您的独立密码库' }}</p>
+      <p class="unlock-sub">{{ isRegister ? '注册新的独立本地密码库' : '登录并解锁您的独立密码库' }}</p>
 
       <form @submit.prevent="submit" class="unlock-form">
         <!-- 用户名输入 -->

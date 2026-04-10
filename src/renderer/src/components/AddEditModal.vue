@@ -27,13 +27,16 @@
           <input v-model="form.username" type="text" placeholder="用户名 / 邮箱" />
         </div>
         <div class="form-row">
-          <label>密码 <span class="required">*</span></label>
+          <label>
+            密码
+            <span v-if="!isEditMode" class="required">*</span>
+          </label>
           <div class="pwd-input-wrap">
             <input
               v-model="form.password"
               :type="showPwd ? 'text' : 'password'"
-              placeholder="输入新密码"
-              required
+              :placeholder="isEditMode ? '留空表示不修改密码' : '输入新密码'"
+              :required="!isEditMode"
             />
             <button type="button" class="toggle-eye" @click="showPwd = !showPwd">
               {{ showPwd ? '🙈' : '👁️' }}
@@ -65,6 +68,7 @@ import { ref, computed, onMounted } from 'vue'
 
 const props = defineProps({ editing: Object })
 const emit = defineEmits(['close', 'saved'])
+const isEditMode = computed(() => Boolean(props.editing))
 
 const form = ref({
   display_name: '',
@@ -118,26 +122,46 @@ onMounted(() => {
 })
 
 async function submit() {
-  if (!form.value.display_name.trim() || !form.value.password.trim()) {
-    errMsg.value = '名称和密码为必填项'
+  const displayName = form.value.display_name.trim()
+  const identity = (form.value.identity || displayName).trim()
+  const username = form.value.username.trim()
+  const password = form.value.password
+  const hasPasswordInput = Boolean(password.trim())
+
+  if (!displayName) {
+    errMsg.value = '名称为必填项'
     return
   }
+
+  if (!isEditMode.value && !hasPasswordInput) {
+    errMsg.value = '创建账号时密码为必填项'
+    return
+  }
+
   saving.value = true
   errMsg.value = ''
   try {
-    if (props.editing) {
-      await window.localpass.updateCredential({
+    if (isEditMode.value) {
+      const payload = {
         app_id: props.editing.id,
-        username: form.value.username,
-        password: form.value.password
-      })
+        display_name: displayName,
+        identity,
+        category: form.value.category,
+        username
+      }
+
+      if (hasPasswordInput) {
+        payload.password = password
+      }
+
+      await window.localpass.updateApp(payload)
     } else {
       await window.localpass.createApp({
-        display_name: form.value.display_name,
-        identity: form.value.identity || form.value.display_name,
+        display_name: displayName,
+        identity,
         category: form.value.category,
-        username: form.value.username,
-        password: form.value.password
+        username,
+        password
       })
     }
     emit('saved')
