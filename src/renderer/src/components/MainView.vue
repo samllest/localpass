@@ -6,21 +6,15 @@
         <span class="total-badge">共 {{ apps.length }} 条</span>
       </div>
       <nav class="sidebar-nav">
-        <button
-          class="nav-item"
-          :class="{ active: filter === 'all' }"
-          @click="filter = 'all'"
-        >🗃️ 全部账号</button>
-        <button
-          class="nav-item"
-          :class="{ active: filter === 'web' }"
-          @click="filter = 'web'"
-        >🌐 网页账号</button>
-        <button
-          class="nav-item"
-          :class="{ active: filter === 'app' }"
-          @click="filter = 'app'"
-        >🖥️ 应用账号</button>
+        <button class="nav-item" :class="{ active: filter === 'all' }" @click="filter = 'all'">
+          🗃️ 全部账号
+        </button>
+        <button class="nav-item" :class="{ active: filter === 'web' }" @click="filter = 'web'">
+          🌐 网页账号
+        </button>
+        <button class="nav-item" :class="{ active: filter === 'app' }" @click="filter = 'app'">
+          🖥️ 应用账号
+        </button>
       </nav>
       <div class="sidebar-footer">
         <button class="btn-lock" @click="lock">🔒 锁定</button>
@@ -54,7 +48,7 @@
       <div v-else class="cards-grid">
         <PasswordCard
           v-for="item in filtered"
-          :key="item.id"
+          :key="`${item.app_id || item.id}:${item.credential_id || 'latest'}`"
           :item="item"
           @edit="openEdit"
           @delete="onDelete"

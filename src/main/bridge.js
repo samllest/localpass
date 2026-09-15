@@ -1,6 +1,12 @@
 import { createServer } from 'http'
 
-import { createApp, findAppByIdentity, isVaultUnlocked, updateCredential } from './db.js'
+import {
+  createApp,
+  findAppByIdentity,
+  isVaultUnlocked,
+  listCredentialsByIdentity,
+  updateCredential
+} from './db.js'
 
 let webContents = null
 let server = null
@@ -8,6 +14,11 @@ const MAX_CAPTURE_BODY_BYTES = 32 * 1024
 
 function normalizeField(value) {
   return value == null ? '' : String(value).trim()
+}
+
+function sendJson(res, status, payload) {
+  res.writeHead(status, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify(payload))
 }
 
 export function initBridgeServer(winWebContents) {
@@ -20,7 +31,7 @@ export function initBridgeServer(winWebContents) {
   const port = 35320
   server = createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
     if (req.method === 'OPTIONS') {
@@ -29,7 +40,36 @@ export function initBridgeServer(winWebContents) {
       return
     }
 
-    if (req.method !== 'POST' || req.url !== '/capture') {
+    const requestUrl = new URL(req.url || '/', 'http://127.0.0.1')
+
+    if (req.method === 'GET' && requestUrl.pathname === '/lookup') {
+      if (!isVaultUnlocked()) {
+        sendJson(res, 423, { ok: false, error: 'Vault locked', accounts: [] })
+        return
+      }
+
+      const identity = normalizeField(requestUrl.searchParams.get('identity'))
+      if (!identity) {
+        sendJson(res, 400, { ok: false, error: 'Identity is required', accounts: [] })
+        return
+      }
+
+      try {
+        const accounts = listCredentialsByIdentity(identity).map((account) => ({
+          id: account.app_id,
+          username: account.username || '',
+          password: account.password,
+          displayName: account.display_name
+        }))
+        sendJson(res, 200, { ok: true, accounts })
+      } catch (error) {
+        console.error('[Bridge] Error loading credentials:', error)
+        sendJson(res, 500, { ok: false, error: 'Internal error', accounts: [] })
+      }
+      return
+    }
+
+    if (req.method !== 'POST' || requestUrl.pathname !== '/capture') {
       res.writeHead(404)
       res.end('Not Found')
       return
@@ -51,8 +91,7 @@ export function initBridgeServer(winWebContents) {
     req.on('end', () => {
       try {
         if (!isVaultUnlocked()) {
-          res.writeHead(423, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'Vault locked' }))
+          sendJson(res, 423, { ok: false, error: 'Vault locked' })
           return
         }
 
@@ -63,12 +102,11 @@ export function initBridgeServer(winWebContents) {
         const displayName = normalizeField(payload.display_name) || identity
 
         if (!identity || !password) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'Invalid payload' }))
+          sendJson(res, 400, { ok: false, error: 'Invalid payload' })
           return
         }
 
-        const existing = findAppByIdentity(identity)
+        const existing = findAppByIdentity(identity, username)
         let changed = false
 
         if (existing) {
@@ -93,12 +131,10 @@ export function initBridgeServer(winWebContents) {
           webContents.send('app:refreshList')
         }
 
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, changed }))
+        sendJson(res, 200, { ok: true, changed })
       } catch (error) {
         console.error('[Bridge] Error saving captured data:', error)
-        res.writeHead(500, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: 'Internal error' }))
+        sendJson(res, 500, { ok: false, error: 'Internal error' })
       }
     })
   })

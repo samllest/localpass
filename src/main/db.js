@@ -1,8 +1,8 @@
 ﻿import Database from 'better-sqlite3'
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto'
 import { join } from 'path'
 
 import { getDbDir } from './storage'
+import { decryptSecret, deriveVaultKey, encryptSecret } from './vault-crypto'
 
 let db = null
 let masterKey = null
@@ -46,7 +46,7 @@ function normalizeAppFields({ identity, display_name, category }) {
 }
 
 export function setMasterPassword(password, salt) {
-  masterKey = scryptSync(password, `localpass-vault:${salt}`, 32)
+  masterKey = deriveVaultKey(password, salt)
 }
 
 export function clearMasterKey() {
@@ -75,28 +75,13 @@ function ensureUnlocked() {
 function encrypt(plaintext) {
   ensureUnlocked()
 
-  const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', masterKey, iv)
-  const encrypted = Buffer.concat([cipher.update(normalizeText(plaintext), 'utf8'), cipher.final()])
-  const tag = cipher.getAuthTag()
-
-  return {
-    blob: Buffer.concat([encrypted, tag]).toString('base64'),
-    iv: iv.toString('base64')
-  }
+  return encryptSecret(normalizeText(plaintext), masterKey)
 }
 
 function decrypt(blob, ivB64) {
   ensureUnlocked()
 
-  const iv = Buffer.from(ivB64, 'base64')
-  const data = Buffer.from(blob, 'base64')
-  const tag = data.slice(data.length - 16)
-  const encrypted = data.slice(0, data.length - 16)
-  const decipher = createDecipheriv('aes-256-gcm', masterKey, iv)
-  decipher.setAuthTag(tag)
-
-  return decipher.update(encrypted, undefined, 'utf8') + decipher.final('utf8')
+  return decryptSecret(blob, ivB64, masterKey)
 }
 
 function safeDecrypt(blob, iv) {
@@ -173,7 +158,7 @@ export function initDB(dbFilename) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS apps (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      identity TEXT UNIQUE,
+      identity TEXT NOT NULL,
       display_name TEXT NOT NULL,
       category TEXT CHECK(category IN ('web', 'app')) DEFAULT 'web',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -198,10 +183,41 @@ export function initDB(dbFilename) {
     ON credentials(app_id, version_tag DESC);
   `)
 
+  migrateUniqueIdentityConstraint()
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_identity ON apps(identity);`)
+
   return currentDbPath
 }
 
-export function findAppByIdentity(identity) {
+function migrateUniqueIdentityConstraint() {
+  const schema = db
+    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'apps'`)
+    .get()
+
+  if (!schema?.sql?.match(/identity\s+TEXT\s+UNIQUE/i)) return
+
+  db.pragma('foreign_keys = OFF')
+  db.pragma('legacy_alter_table = ON')
+  db.transaction(() => {
+    db.exec(`
+      ALTER TABLE apps RENAME TO apps_legacy;
+      CREATE TABLE apps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        identity TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        category TEXT CHECK(category IN ('web', 'app')) DEFAULT 'web',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO apps (id, identity, display_name, category, created_at)
+        SELECT id, identity, display_name, category, created_at FROM apps_legacy;
+      DROP TABLE apps_legacy;
+    `)
+  })()
+  db.pragma('legacy_alter_table = OFF')
+  db.pragma('foreign_keys = ON')
+}
+
+export function findAppByIdentity(identity, username) {
   ensureVaultOpen()
 
   const normalizedIdentity = normalizeText(identity).trim()
@@ -209,15 +225,20 @@ export function findAppByIdentity(identity) {
     return null
   }
 
+  const normalizedUsername = normalizeUsername(username)
   const row = db
     .prepare(
-      `SELECT a.id, a.identity, a.display_name, a.category, a.created_at,
-              c.username, c.password_blob, c.iv, c.version_tag, c.captured_at
+      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at,
+              c.id AS credential_id, c.username, c.password_blob, c.iv,
+              c.version_tag, c.captured_at
        FROM apps a
        LEFT JOIN credentials c ON c.app_id = a.id AND c.is_latest = 1
-       WHERE a.identity = ?`
+       WHERE a.identity = ?
+         AND ((c.username = ?) OR (c.username IS NULL AND ? IS NULL))
+       ORDER BY a.id DESC
+       LIMIT 1`
     )
-    .get(normalizedIdentity)
+    .get(normalizedIdentity, normalizedUsername, normalizedUsername)
 
   return row ? mapCredentialRow(row) : null
 }
@@ -227,8 +248,9 @@ export function listApps() {
 
   return db
     .prepare(
-      `SELECT a.id, a.identity, a.display_name, a.category, a.created_at,
-              c.username, c.password_blob, c.iv, c.version_tag, c.captured_at
+      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at,
+              c.id AS credential_id, c.username, c.password_blob, c.iv,
+              c.version_tag, c.captured_at
        FROM apps a
        LEFT JOIN credentials c ON c.app_id = a.id AND c.is_latest = 1
        ORDER BY a.id DESC`
@@ -390,5 +412,25 @@ export function getHistory(app_id) {
        ORDER BY version_tag DESC`
     )
     .all(app_id)
+    .map(mapCredentialRow)
+}
+
+export function listCredentialsByIdentity(identity) {
+  ensureUnlocked()
+
+  const normalizedIdentity = normalizeText(identity).trim()
+  if (!normalizedIdentity) return []
+
+  return db
+    .prepare(
+      `SELECT a.id AS app_id, a.identity, a.display_name, a.category,
+              c.id AS credential_id, c.username, c.password_blob, c.iv,
+              c.version_tag, c.captured_at
+       FROM apps a
+       INNER JOIN credentials c ON c.app_id = a.id AND c.is_latest = 1
+       WHERE a.identity = ?
+       ORDER BY c.username COLLATE NOCASE`
+    )
+    .all(normalizedIdentity)
     .map(mapCredentialRow)
 }
