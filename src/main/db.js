@@ -173,7 +173,7 @@ export function initDB(dbFilename) {
       version_tag INTEGER DEFAULT 1,
       is_latest INTEGER DEFAULT 1,
       captured_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (app_id) REFERENCES apps(id)
+      FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_credentials_latest
