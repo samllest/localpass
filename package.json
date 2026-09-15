@@ -8,6 +8,7 @@
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",
+    "test": "node --test",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
