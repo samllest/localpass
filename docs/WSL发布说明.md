@@ -55,6 +55,29 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-wsl-downlo
 
 这不会关闭防火墙。可用 `Remove-NetFirewallHyperVRule -Name LocalPass-Downloads-18770` 撤销规则。主机自身访问局域网 IP 还可能受 WSL 的回环设置影响，验证页面时本机使用 `localhost`，其他电脑使用主机局域网 IP。
 
+如果 `localhost` 正常但同一局域网无法访问，使用独立的 WSL 内部端口，避免 Windows 与 WSL 同端口映射冲突。先在普通 PowerShell 执行（部署目录按实际情况修改）：
+
+```powershell
+wsl -d Debian -- cp /mnt/e/project/localpass/deploy/wsl/lan.env.example /home/jayg/apps/localpass/.env
+wsl -d Debian -- docker compose --project-directory /home/jayg/apps/localpass --env-file /home/jayg/apps/localpass/.env -f /home/jayg/apps/localpass/compose.yaml up -d --force-recreate
+```
+
+再在管理员 PowerShell 给 Windows 主机的实际局域网 IP 添加专用转发。例如：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-wsl-downloads.ps1 -FirewallOnly -LanAddress 192.168.3.145
+```
+
+容器仅监听 WSL 内部的 `127.0.0.1:18771`；Windows 监听指定局域网 IP 和本机 `127.0.0.1` 的 TCP 18770，转发到内部端口。Windows 防火墙只允许 `LocalSubnet` 访问该端口，适用于当前网络为 Public 的情况。对外访问地址仍为 `http://192.168.3.145:18770/`，本机为 `http://localhost:18770/`。规则在重启后保留；若主机局域网 IP 改变，应先删除旧地址转发，再用新 IP 执行命令。Windows IP Helper 服务需保持运行。`deploy.sh` 会保留 `.env` 并从容器实际映射端口执行健康检查。
+
+撤销这条局域网转发（管理员 PowerShell）：
+
+```powershell
+netsh interface portproxy delete v4tov4 listenaddress=192.168.3.145 listenport=18770
+netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=18770
+Remove-NetFirewallRule -Name LocalPass-LAN-Downloads-18770
+```
+
 ## 使用者安装
 
 1. 下载并运行 Windows 安装包，在桌面端注册自己的账号和主密码。

@@ -3,7 +3,7 @@ services:
   downloads:
     image: nginx:stable-alpine
     ports:
-      - '${LOCALPASS_DOWNLOAD_PORT:-18770}:80'
+      - '${LOCALPASS_BIND_ADDRESS:-0.0.0.0}:${LOCALPASS_DOWNLOAD_PORT:-18770}:80'
     volumes:
       - ./site:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
