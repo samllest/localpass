@@ -4,7 +4,8 @@ param(
   [string]$Distro = 'Debian',
   [switch]$FirewallOnly,
   [string]$LanAddress,
-  [ValidateRange(1024, 65535)][int]$BackendPort = 18771
+  [ValidateRange(1024, 65535)][int]$BackendPort = 18771,
+  [string]$DeployDirectory
 )
 $ErrorActionPreference = 'Stop'
 if ($FirewallOnly) {
@@ -46,11 +47,33 @@ if ($FirewallOnly) {
   exit
 }
 if ($Distro -notmatch '^[\w.-]+$') { throw 'Invalid WSL distribution name.' }
+if ($DeployDirectory -and $DeployDirectory -notmatch '^/[\w./-]+$') {
+  throw 'DeployDirectory must be an absolute Linux path without spaces.'
+}
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\wsl.exe" -Argument "-d $Distro --exec sleep infinity"
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
+$runtimeDirectory = Join-Path $env:LOCALAPPDATA 'LocalPass\WSL'
+New-Item -ItemType Directory -Path $runtimeDirectory -Force | Out-Null
+$runnerPath = Join-Path $runtimeDirectory 'keep-wsl-downloads-running.ps1'
+$runnerSource = Join-Path $PSScriptRoot 'keep-wsl-downloads-running.ps1'
+if (-not (Test-Path -LiteralPath $runnerSource)) { throw 'The WSL supervisor script is missing.' }
+$existingTask = Get-ScheduledTask -TaskName 'LocalPass-WSL-Downloads' -ErrorAction SilentlyContinue
+if ($existingTask -and $existingTask.State -eq 'Running') {
+  Stop-ScheduledTask -TaskName 'LocalPass-WSL-Downloads'
+}
+Copy-Item -LiteralPath $runnerSource -Destination $runnerPath -Force
+$runnerCode = Get-Content -LiteralPath $runnerSource -Raw
+# Store the supervisor in the task, so startup does not depend on a terminal,
+# the repository location, or the registering process's filesystem context.
+$invocation = "& {`n$runnerCode`n} -Distro '$Distro'"
+if ($DeployDirectory) { $invocation += " -DeployDirectory '$DeployDirectory'" }
+$encodedInvocation = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($invocation))
+$arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand $encodedInvocation"
+$action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $arguments
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
+$retryTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-ScheduledTask -TaskName 'LocalPass-WSL-Downloads' -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings -Description 'Keep Debian WSL running for the LocalPass download service.' -Force | Out-Null
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName 'LocalPass-WSL-Downloads' -Action $action -Trigger @($logonTrigger, $retryTrigger) -Principal $taskPrincipal -Settings $settings -Description 'Supervise LocalPass WSL downloads independently of terminal windows; retry after interruption.' -Force | Out-Null
 Start-ScheduledTask -TaskName 'LocalPass-WSL-Downloads'
 Get-ScheduledTask -TaskName 'LocalPass-WSL-Downloads' | Select-Object TaskName,State
+Write-Output "Supervisor log: $(Join-Path $runtimeDirectory 'keepalive.log')"

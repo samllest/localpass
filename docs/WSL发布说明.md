@@ -41,10 +41,26 @@ docker compose logs --tail=50
 
 Docker 服务启动后，容器通过 `unless-stopped` 自动启动；主机与 WSL 需要保持运行。重新构建并再次执行 `deploy.sh` 即可发布更新，旧下载版本保留在 `releases/`，`site` 指向当前版本。
 
-为避免 WSL 在终端退出后停止，可在普通 PowerShell 执行以下命令，创建当前用户登录时启动的 `LocalPass-WSL-Downloads` 任务：
+为避免 WSL 在终端退出后停止，可在普通 PowerShell 执行以下命令，安装独立后台守护任务 `LocalPass-WSL-Downloads`：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-wsl-downloads.ps1
+```
+
+守护程序由 Windows 任务计划程序启动，不依赖当前终端或项目目录。它在 Docker 就绪后启动 LocalPass 下载容器并保持 WSL 活跃；保活进程退出后 15 秒重试。任务在用户登录时启动，并每分钟尝试拉起一次；已有实例运行时忽略重复启动。关闭 PowerShell、CMD 或 WSL 终端不会主动退出守护任务。Windows 用户需要保持登录，主机保持开机且不休眠。
+
+守护代码内置在任务配置中，源脚本为 `scripts/keep-wsl-downloads-running.ps1`。日志由任务运行账户写到 `%LOCALAPPDATA%\LocalPass\WSL\keepalive.log`；可用以下命令查看任务状态：
+
+```powershell
+Get-ScheduledTask -TaskName LocalPass-WSL-Downloads
+Get-ScheduledTaskInfo -TaskName LocalPass-WSL-Downloads
+```
+
+默认部署目录是 WSL 当前用户的 `~/apps/localpass`。如果使用其他目录，安装任务时添加 `-DeployDirectory /absolute/linux/path`。守护任务仅自动启动该目录内的 Compose 项目，不会自动重启 Debian 或 Windows 网络服务。需要手动停止守护时，应先禁用任务，再停止任务，避免下一分钟被重新拉起：
+
+```powershell
+Disable-ScheduledTask -TaskName LocalPass-WSL-Downloads
+Stop-ScheduledTask -TaskName LocalPass-WSL-Downloads
 ```
 
 WSL mirrored 网络默认阻止外部入站连接。在管理员 PowerShell 执行以下命令，只放行下载服务的 TCP 18770 端口：
