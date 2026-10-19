@@ -7,6 +7,10 @@ CREATE TABLE IF NOT EXISTS apps (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   identity TEXT NOT NULL,
   display_name TEXT NOT NULL,
+  site_name TEXT NOT NULL DEFAULT '',
+  page_title TEXT NOT NULL DEFAULT '',
+  site_url TEXT NOT NULL DEFAULT '',
+  icon_data TEXT NOT NULL DEFAULT '',
   category TEXT NOT NULL DEFAULT 'web' CHECK (category IN ('web', 'app')),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

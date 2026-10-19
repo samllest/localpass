@@ -1,17 +1,10 @@
 {
   "manifest_version": 3,
   "name": "LocalPass Auto Capturer",
-  "version": "1.0",
+  "version": "1.2.0",
   "description": "Automatically captures login form submissions and pushes them to LocalPass.",
-  "permissions": [
-    "nativeMessaging",
-    "webRequest",
-    "storage",
-    "tabs"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "permissions": ["nativeMessaging", "webRequest", "storage", "tabs", "favicon"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },

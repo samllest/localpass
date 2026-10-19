@@ -1,8 +1,10 @@
-﻿import Database from 'better-sqlite3'
+import Database from 'better-sqlite3'
 import { join } from 'path'
+import { existsSync } from 'fs'
 
-import { getDbDir } from './storage'
-import { decryptSecret, deriveVaultKey, encryptSecret } from './vault-crypto'
+import { getDbDir } from './storage.js'
+import { decryptSecret, deriveVaultKey, encryptSecret } from './vault-crypto.js'
+import { normalizeSiteMetadata } from '../shared/site-metadata.js'
 
 let db = null
 let masterKey = null
@@ -57,8 +59,14 @@ export function closeVault() {
   if (db) {
     db.close()
     db = null
-    currentDbPath = null
   }
+  currentDbPath = null
+  clearMasterKey()
+}
+
+export function getVaultInfo() {
+  ensureUnlocked()
+  return { dbPath: currentDbPath }
 }
 
 export function isVaultUnlocked() {
@@ -144,18 +152,33 @@ function saveCredentialVersion(appId, username, password, latest = getLatestCred
   return { updated: true, version_tag: nextVersion }
 }
 
-export function initDB(dbFilename) {
-  if (!dbFilename) {
-    throw new Error('dbFilename is required')
+export function initDB(dbFilename, { createIfMissing = false } = {}) {
+  if (typeof dbFilename !== 'string' || !/^[\w-]+\.db$/.test(dbFilename)) {
+    throw new Error('密码库文件名无效')
   }
 
   closeVault()
 
-  currentDbPath = join(getDbDir(), dbFilename)
-  db = new Database(currentDbPath)
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
-  db.exec(`
+  const dbPath = join(getDbDir(), dbFilename)
+  if (!createIfMissing && !existsSync(dbPath)) {
+    throw new Error(`找不到此账号的密码库，已停止解锁，未创建空库。请恢复原文件：${dbPath}`)
+  }
+  if (createIfMissing && existsSync(dbPath)) {
+    throw new Error('密码库文件已存在，已停止创建以保护原数据')
+  }
+
+  try {
+    db = new Database(dbPath, { fileMustExist: !createIfMissing })
+    currentDbPath = dbPath
+    if (!createIfMissing) {
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
+      if (!['apps', 'credentials'].every((name) => tables.some((table) => table.name === name))) {
+        throw new Error('密码库结构不完整，已停止解锁。请保留原文件并从备份恢复')
+      }
+    }
+    db.pragma('journal_mode = WAL')
+    db.pragma('foreign_keys = ON')
+    db.exec(`
     CREATE TABLE IF NOT EXISTS apps (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       identity TEXT NOT NULL,
@@ -183,10 +206,26 @@ export function initDB(dbFilename) {
     ON credentials(app_id, version_tag DESC);
   `)
 
-  migrateUniqueIdentityConstraint()
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_identity ON apps(identity);`)
+    migrateUniqueIdentityConstraint()
+    const columns = new Set(
+      db
+        .prepare('PRAGMA table_info(apps)')
+        .all()
+        .map((column) => column.name)
+    )
+    db.transaction(() => {
+      for (const column of ['site_name', 'page_title', 'site_url', 'icon_data']) {
+        if (!columns.has(column))
+          db.exec(`ALTER TABLE apps ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`)
+      }
+    })()
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_identity ON apps(identity);`)
 
-  return currentDbPath
+    return currentDbPath
+  } catch (error) {
+    closeVault()
+    throw error
+  }
 }
 
 function migrateUniqueIdentityConstraint() {
@@ -228,7 +267,7 @@ export function findAppByIdentity(identity, username) {
   const normalizedUsername = normalizeUsername(username)
   const row = db
     .prepare(
-      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at,
+      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data,
               c.id AS credential_id, c.username, c.password_blob, c.iv,
               c.version_tag, c.captured_at
        FROM apps a
@@ -248,7 +287,7 @@ export function listApps() {
 
   return db
     .prepare(
-      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at,
+      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data,
               c.id AS credential_id, c.username, c.password_blob, c.iv,
               c.version_tag, c.captured_at
        FROM apps a
@@ -269,7 +308,7 @@ export function searchApps(query) {
 
   return db
     .prepare(
-      `SELECT a.id, a.identity, a.display_name, a.category, a.created_at,
+      `SELECT a.id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data,
               c.username, c.password_blob, c.iv, c.version_tag, c.captured_at
        FROM apps a
        LEFT JOIN credentials c ON c.app_id = a.id AND c.is_latest = 1
@@ -280,10 +319,18 @@ export function searchApps(query) {
     .map(mapCredentialRow)
 }
 
-export function createApp({ identity, display_name, category = 'web', username, password }) {
+export function createApp({
+  identity,
+  display_name,
+  category = 'web',
+  username,
+  password,
+  ...metadata
+}) {
   ensureUnlocked()
 
   const appFields = normalizeAppFields({ identity, display_name, category })
+  const site = normalizeSiteMetadata(metadata, appFields.identity)
   const nextPassword = normalizeText(password)
   if (!nextPassword) {
     throw new Error('Password is required')
@@ -293,7 +340,7 @@ export function createApp({ identity, display_name, category = 'web', username, 
   const storedUsername = normalizeUsername(username)
 
   const insertApp = db.prepare(
-    `INSERT INTO apps (identity, display_name, category) VALUES (?, ?, ?)`
+    `INSERT INTO apps (identity, display_name, category, site_name, page_title, site_url, icon_data) VALUES (?, ?, ?, ?, ?, ?, ?)`
   )
   const insertCred = db.prepare(
     `INSERT INTO credentials (app_id, username, password_blob, iv, version_tag, is_latest)
@@ -301,7 +348,15 @@ export function createApp({ identity, display_name, category = 'web', username, 
   )
 
   return db.transaction(() => {
-    const appResult = insertApp.run(appFields.identity, appFields.display_name, appFields.category)
+    const appResult = insertApp.run(
+      appFields.identity,
+      appFields.display_name,
+      appFields.category,
+      site.site_name,
+      site.page_title,
+      site.site_url,
+      site.icon_data
+    )
     insertCred.run(appResult.lastInsertRowid, storedUsername, blob, iv)
     return appResult.lastInsertRowid
   })()
@@ -322,7 +377,15 @@ export function updateCredential({ app_id, username, password }) {
   return db.transaction(() => saveCredentialVersion(appId, username, nextPassword))()
 }
 
-export function updateApp({ app_id, display_name, identity, category, username, password }) {
+export function updateApp({
+  app_id,
+  display_name,
+  identity,
+  category,
+  username,
+  password,
+  ...metadata
+}) {
   ensureUnlocked()
 
   const appId = Number(app_id)
@@ -330,9 +393,7 @@ export function updateApp({ app_id, display_name, identity, category, username, 
     throw new Error('Invalid app id')
   }
 
-  const existingApp = db
-    .prepare(`SELECT id, identity, display_name, category FROM apps WHERE id = ?`)
-    .get(appId)
+  const existingApp = db.prepare(`SELECT * FROM apps WHERE id = ?`).get(appId)
   if (!existingApp) {
     throw new Error('App not found')
   }
@@ -342,18 +403,37 @@ export function updateApp({ app_id, display_name, identity, category, username, 
     display_name: display_name ?? existingApp.display_name,
     category: category ?? existingApp.category
   })
+  const site = normalizeSiteMetadata(
+    {
+      ...(nextAppFields.identity === existingApp.identity &&
+      nextAppFields.category === existingApp.category
+        ? existingApp
+        : {}),
+      ...metadata
+    },
+    nextAppFields.identity
+  )
 
   return db.transaction(() => {
     const metadataChanged =
       existingApp.identity !== nextAppFields.identity ||
       existingApp.display_name !== nextAppFields.display_name ||
-      existingApp.category !== nextAppFields.category
+      existingApp.category !== nextAppFields.category ||
+      ['site_name', 'page_title', 'site_url', 'icon_data'].some(
+        (key) => existingApp[key] !== site[key]
+      )
 
     if (metadataChanged) {
-      db.prepare(`UPDATE apps SET identity = ?, display_name = ?, category = ? WHERE id = ?`).run(
+      db.prepare(
+        `UPDATE apps SET identity = ?, display_name = ?, category = ?, site_name = ?, page_title = ?, site_url = ?, icon_data = ? WHERE id = ?`
+      ).run(
         nextAppFields.identity,
         nextAppFields.display_name,
         nextAppFields.category,
+        site.site_name,
+        site.page_title,
+        site.site_url,
+        site.icon_data,
         appId
       )
     }
@@ -433,4 +513,79 @@ export function listCredentialsByIdentity(identity) {
     )
     .all(normalizedIdentity)
     .map(mapCredentialRow)
+}
+
+export function exportVaultData() {
+  ensureUnlocked()
+
+  const records = listApps().map((record) => ({
+    identity: record.identity,
+    display_name: record.display_name,
+    category: record.category,
+    site_name: record.site_name,
+    page_title: record.page_title,
+    site_url: record.site_url,
+    icon_data: record.icon_data,
+    username: record.username,
+    password: record.password
+  }))
+  const payload = JSON.stringify({ format: 'localpass-export', version: 1, records })
+  const { blob, iv } = encryptSecret(payload, masterKey)
+
+  return JSON.stringify(
+    { format: 'localpass-export', version: 1, encrypted: true, blob, iv },
+    null,
+    2
+  )
+}
+
+export function importVaultData(serialized) {
+  ensureUnlocked()
+
+  let envelope
+  try {
+    envelope = JSON.parse(normalizeText(serialized))
+  } catch {
+    throw new Error('导入文件格式无效')
+  }
+
+  if (envelope?.format !== 'localpass-export' || envelope?.version !== 1 || !envelope.encrypted) {
+    throw new Error('不是有效的 LocalPass 加密备份')
+  }
+
+  let payload
+  try {
+    payload = JSON.parse(decryptSecret(envelope.blob, envelope.iv, masterKey))
+  } catch {
+    throw new Error('备份无法解密，可能来自其他密码库')
+  }
+
+  if (!Array.isArray(payload?.records)) {
+    throw new Error('备份记录无效')
+  }
+
+  let imported = 0
+  for (const record of payload.records) {
+    const identity = normalizeText(record.identity).trim()
+    const password = normalizeText(record.password)
+    if (!identity || !password) continue
+
+    const username = normalizeUsername(record.username)
+    const existing = findAppByIdentity(identity, username)
+    if (existing) {
+      updateApp({ ...record, app_id: existing.id, identity, username, password })
+    } else {
+      createApp({
+        ...record,
+        identity,
+        display_name: normalizeText(record.display_name).trim() || identity,
+        category: record.category,
+        username,
+        password
+      })
+    }
+    imported += 1
+  }
+
+  return imported
 }

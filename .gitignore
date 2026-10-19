@@ -4,3 +4,10 @@ out
 .DS_Store
 .eslintcache
 *.log*
+/.localpass-data/
+*.pem
+*.crx
+*.db
+*.db-wal
+*.db-shm
+*.localpass

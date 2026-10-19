@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="description"
+      content="下载 LocalPass 本地密码管理器与浏览器扩展，每个人拥有自己的加密密码库。"
+    />
+    <title>下载 LocalPass · 你的本地密码管理器</title>
+    <style>
+      :root {
+        --blue: #0b57d0;
+        --bg: #f4f7fd;
+        --ink: #17213b;
+        --muted: #61708a;
+        --line: #dfe5f0;
+        --paper: #fff;
+        font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      a {
+        color: var(--blue);
+      }
+      a:focus-visible {
+        outline: 3px solid #77a7fb;
+        outline-offset: 5px;
+      }
+      main,
+      header,
+      footer {
+        width: min(1040px, calc(100% - 48px));
+        margin: auto;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 28px 0;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--ink);
+        text-decoration: none;
+        font-weight: 650;
+        font-size: 21px;
+      }
+      .logo {
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        background: #e5edff;
+        border: 1px solid #c9d9ff;
+        border-radius: 12px;
+        color: var(--blue);
+      }
+      svg {
+        width: 24px;
+        height: 24px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .release {
+        font-size: 13px;
+        color: var(--muted);
+        border: 1px solid var(--line);
+        padding: 7px 12px;
+        border-radius: 20px;
+      }
+      .hero {
+        padding: 62px 0 44px;
+        max-width: 800px;
+      }
+      .eyebrow {
+        color: var(--blue);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        margin: 0 0 18px;
+      }
+      h1 {
+        font-family: 'Segoe UI Variable Display', 'Microsoft YaHei', sans-serif;
+        font-size: clamp(34px, 5.2vw, 58px);
+        line-height: 1.3;
+        letter-spacing: -0.04em;
+        font-weight: 650;
+        margin: 0 0 22px;
+      }
+      .intro {
+        color: var(--muted);
+        max-width: 650px;
+        line-height: 1.9;
+        font-size: 17px;
+        margin: 0;
+      }
+      .downloads {
+        display: grid;
+        grid-template-columns: 1.15fr 1fr;
+        gap: 20px;
+      }
+      .download {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 30px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .download.primary {
+        border-top: 4px solid var(--blue);
+        padding-top: 27px;
+      }
+      .file-label {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0 0 22px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .file-label svg {
+        width: 19px;
+        height: 19px;
+      }
+      .download h2 {
+        font-size: 23px;
+        margin: 0 0 12px;
+        font-weight: 600;
+      }
+      .download p {
+        color: var(--muted);
+        line-height: 1.8;
+        margin: 0 0 24px;
+        max-width: 360px;
+      }
+      .download .button {
+        margin-top: auto;
+      }
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        min-height: 46px;
+        padding: 12px 22px;
+        border-radius: 24px;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 600;
+        border: 1px solid var(--line);
+        color: var(--blue);
+      }
+      .button:hover {
+        background: #edf3ff;
+      }
+      .primary .button {
+        background: var(--blue);
+        color: white;
+        border-color: var(--blue);
+      }
+      .primary .button:hover {
+        background: #0949b0;
+      }
+      .file-meta {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 13px;
+      }
+      .setup {
+        padding: 52px 0 32px;
+      }
+      .setup h2 {
+        font-size: 23px;
+        font-weight: 600;
+        margin: 0 0 28px;
+      }
+      .steps {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 30px;
+      }
+      .step-number {
+        display: grid;
+        place-items: center;
+        background: #e5edff;
+        color: var(--blue);
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 14px;
+      }
+      .steps h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0 0 10px;
+      }
+      .steps p {
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.85;
+        margin: 0;
+      }
+      code {
+        font-family: Consolas, monospace;
+        font-size: 12px;
+        overflow-wrap: anywhere;
+        color: var(--ink);
+        background: #e9effa;
+        padding: 2px 5px;
+        border-radius: 4px;
+      }
+      .note {
+        margin: 32px 0 0;
+        padding: 20px 24px;
+        display: flex;
+        gap: 12px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.8;
+      }
+      .note svg {
+        flex: 0 0 21px;
+        color: var(--blue);
+        margin-top: 2px;
+      }
+      .note p {
+        margin: 0;
+      }
+      .note strong {
+        font-weight: 600;
+        color: var(--ink);
+      }
+      footer {
+        border-top: 1px solid var(--line);
+        padding: 24px 0 34px;
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .footer-links {
+        display: flex;
+        gap: 22px;
+      }
+      footer a {
+        text-decoration: none;
+      }
+      footer a:hover {
+        text-decoration: underline;
+      }
+      @media (max-width: 650px) {
+        main,
+        header,
+        footer {
+          width: calc(100% - 36px);
+        }
+        header {
+          padding: 22px 0;
+        }
+        .hero {
+          padding: 34px 0;
+        }
+        .intro {
+          font-size: 15px;
+        }
+        .downloads,
+        .steps {
+          grid-template-columns: 1fr;
+        }
+        .download {
+          padding: 25px;
+        }
+        .download.primary {
+          padding-top: 22px;
+        }
+        .steps {
+          gap: 25px;
+        }
+        .setup {
+          padding-top: 38px;
+        }
+        .note {
+          padding: 18px;
+        }
+        footer {
+          flex-direction: column;
+        }
+        .footer-links {
+          flex-wrap: wrap;
+        }
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .button {
+          transition: background 0.15s ease;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="./"
+        ><span class="logo"
+          ><svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5" y="10" width="14" height="11" rx="3" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+            <path d="M12 14v3" /></svg></span
+        >LocalPass</a
+      ><span class="release">v__VERSION__ · Windows</span>
+    </header>
+    <main>
+      <section class="hero">
+        <p class="eyebrow">你的本地密码管理器</p>
+        <h1>把密码留在<br />自己的电脑上。</h1>
+        <p class="intro">
+          保存网站账号，按需填入登录表单。LocalPass
+          桌面端与浏览器扩展配合使用，每个人都有自己的加密密码库。
+        </p>
+      </section>
+      <section class="downloads" aria-label="下载 LocalPass">
+        <article class="download primary">
+          <div class="file-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="13" rx="2" />
+              <path d="M8 21h8m-4-4v4" /></svg
+            >桌面端 · WINDOWS X64
+          </div>
+          <h2>安装 LocalPass</h2>
+          <p>管理账号、查看密码历史与备份。安装包内也附带浏览器扩展文件。</p>
+          <a class="button" href="localpass-__VERSION__-setup.exe" download
+            >下载 Windows 安装包 <span aria-hidden="true">↓</span></a
+          ><span class="file-meta"
+            >v__VERSION__ · __INSTALLER_SIZE__ MB · 适用于 Windows 10 / 11</span
+          >
+        </article>
+        <article class="download">
+          <div class="file-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="4" />
+              <path d="M3 9h18m-12 0v12" /></svg
+            >浏览器扩展 · CHROME / EDGE
+          </div>
+          <h2>连接你的浏览器</h2>
+          <p>登录后保存账号，在需要时选择已保存的账号填写。下载后解压并加载扩展。</p>
+          <a class="button" href="localpass-extension-__EXTENSION_VERSION__.zip" download
+            >下载浏览器扩展 <span aria-hidden="true">↓</span></a
+          ><span class="file-meta">v__EXTENSION_VERSION__ · ZIP 压缩包</span>
+        </article>
+      </section>
+      <section class="setup" aria-labelledby="setup-title">
+        <h2 id="setup-title">三步，开始使用</h2>
+        <ol class="steps">
+          <li>
+            <span class="step-number">1</span>
+            <h3>安装并注册本地账号</h3>
+            <p>运行桌面安装包，创建你的账号与主密码。主密码用于解锁自己的密码库，请妥善保管。</p>
+          </li>
+          <li>
+            <span class="step-number">2</span>
+            <h3>加载浏览器扩展</h3>
+            <p>
+              解压扩展 ZIP。Chrome 打开 <code>chrome://extensions/</code>，Edge 打开
+              <code>edge://extensions/</code>。开启开发者模式，加载解压后的
+              <code>chrome-extension</code> 文件夹。
+            </p>
+          </li>
+          <li>
+            <span class="step-number">3</span>
+            <h3>解锁，然后登录网站</h3>
+            <p>
+              保持桌面端运行并解锁，刷新网站后登录一次。下次点击登录输入框，即可选择已保存的账号。
+            </p>
+          </li>
+        </ol>
+        <aside class="note">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z" />
+            <path d="m8 12 3 3 5-6" />
+          </svg>
+          <p>
+            <strong>每台电脑，独立保存。</strong
+            >此页面只分发安装文件，密码保存在使用者自己的设备上。更新前可在桌面端「设置」中导出加密备份；更新插件后，请重新加载扩展并刷新网站。
+          </p>
+        </aside>
+      </section>
+    </main>
+    <footer>
+      <span>LocalPass · 本地加密密码管理器</span>
+      <div class="footer-links">
+        <a href="SHA256SUMS.txt">下载文件校验值</a><a href="使用说明.txt">使用说明</a
+        ><a href="https://github.com/samllest/localpass" target="_blank" rel="noopener noreferrer"
+          >项目源码 ↗</a
+        >
+      </div>
+    </footer>
+  </body>
+</html>

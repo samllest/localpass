@@ -4,14 +4,20 @@
     <!-- 标题栏 -->
     <div class="titlebar" @dblclick="maximize">
       <div class="titlebar-brand">
-        <span class="brand-icon">🔐</span>
+        <UiIcon name="brand-titlebar" class="brand-mark" />
         <span class="brand-name">LocalPass</span>
       </div>
-      <div class="titlebar-spacer" style="-webkit-app-region:drag; flex:1" />
+      <div class="titlebar-spacer" />
       <div class="titlebar-controls">
-        <button class="wc-btn minimize" @click="minimize" title="最小化">─</button>
-        <button class="wc-btn maximize" @click="maximize" title="最大化 / 还原">⬜</button>
-        <button class="wc-btn close" @click="closeApp" title="关闭">✕</button>
+        <button class="wc-btn minimize" title="最小化" @click="minimize">
+          <UiIcon name="win-minimize" />
+        </button>
+        <button class="wc-btn maximize" title="最大化 / 还原" @click="maximize">
+          <UiIcon name="win-maximize" />
+        </button>
+        <button class="wc-btn close" title="关闭" @click="closeApp">
+          <UiIcon name="win-close" />
+        </button>
       </div>
     </div>
 
@@ -25,8 +31,17 @@
 
 <script setup>
 import { ref } from 'vue'
+import UiIcon from './components/UiIcon.vue'
 import UnlockScreen from './components/UnlockScreen.vue'
 import MainView from './components/MainView.vue'
+
+const savedTheme = localStorage.getItem('localpass-theme') || 'light'
+document.documentElement.dataset.theme =
+  savedTheme === 'system'
+    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light'
+    : savedTheme
 
 const unlocked = ref(false)
 
@@ -34,7 +49,13 @@ function onUnlocked() {
   unlocked.value = true
 }
 
-function minimize() { window.localpass.minimize() }
-function maximize() { window.localpass.maximize() }
-function closeApp() { window.localpass.close() }
+function minimize() {
+  window.localpass.minimize()
+}
+function maximize() {
+  window.localpass.maximize()
+}
+function closeApp() {
+  window.localpass.close()
+}
 </script>

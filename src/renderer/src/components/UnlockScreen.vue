@@ -1,46 +1,55 @@
 <template>
   <div class="unlock-wrap">
     <div class="unlock-card">
-      <div class="unlock-logo">🔐</div>
+      <div class="unlock-logo"><UiIcon name="logo-lock" class="unlock-logo-icon" /></div>
       <h1 class="unlock-title">LocalPass</h1>
-      <p class="unlock-sub">{{ isRegister ? '注册新的独立本地密码库' : '登录并解锁您的独立密码库' }}</p>
+      <p class="unlock-sub">
+        {{ isRegister ? '注册新的独立本地密码库' : '登录并解锁您的独立密码库' }}
+      </p>
 
-      <form @submit.prevent="submit" class="unlock-form">
+      <form class="unlock-form" @submit.prevent="submit">
         <!-- 用户名输入 -->
         <div class="input-group" :class="{ error: errMsg && !username }">
           <input
             id="username"
             v-model="username"
+            aria-label="用户名"
             type="text"
             placeholder="用户名 (如 example)"
             autocomplete="username"
             autofocus
           />
-          <span class="input-icon">👤</span>
+          <UiIcon name="user" class="input-icon" />
         </div>
-        
+
         <!-- 密码输入 -->
         <div class="input-group" :class="{ error: errMsg && !password }">
           <input
             id="master-pwd"
             v-model="password"
+            aria-label="主密码"
             type="password"
             placeholder="主密码"
             autocomplete="current-password"
           />
-          <span class="input-icon">🔑</span>
+          <UiIcon name="key" class="input-icon" />
         </div>
 
         <!-- 确认密码 (仅注册可见) -->
-        <div v-if="isRegister" class="input-group" :class="{ error: errMsg && password !== confirmPassword }">
+        <div
+          v-if="isRegister"
+          class="input-group"
+          :class="{ error: errMsg && password !== confirmPassword }"
+        >
           <input
             id="confirm-pwd"
             v-model="confirmPassword"
+            aria-label="确认主密码"
             type="password"
             placeholder="确认主密码"
             autocomplete="new-password"
           />
-          <span class="input-icon">🔑</span>
+          <UiIcon name="key" class="input-icon" />
         </div>
 
         <p v-if="errMsg" class="err-msg">{{ errMsg }}</p>
@@ -51,15 +60,16 @@
         </button>
       </form>
 
-      <p class="unlock-hint" style="cursor: pointer; text-decoration: underline;" @click="toggleMode">
+      <button class="unlock-hint" type="button" :disabled="loading" @click="toggleMode">
         {{ isRegister ? '已有账号？点击这里登录' : '没有账号？点击注册专属密码库' }}
-      </p>
+      </button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
+import UiIcon from './UiIcon.vue'
 
 const emit = defineEmits(['unlocked'])
 
@@ -95,7 +105,7 @@ async function submit() {
   errMsg.value = ''
 
   try {
-    let res;
+    let res
     if (isRegister.value) {
       res = await window.localpass.register(username.value, password.value)
     } else {

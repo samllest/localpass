@@ -5,12 +5,13 @@ import {
   findAppByIdentity,
   isVaultUnlocked,
   listCredentialsByIdentity,
-  updateCredential
+  updateApp
 } from './db.js'
+import { capturedSite } from '../shared/site-metadata.js'
 
 let webContents = null
 let server = null
-const MAX_CAPTURE_BODY_BYTES = 32 * 1024
+const MAX_CAPTURE_BODY_BYTES = 64 * 1024
 
 function normalizeField(value) {
   return value == null ? '' : String(value).trim()
@@ -96,10 +97,10 @@ export function initBridgeServer(winWebContents) {
         }
 
         const payload = JSON.parse(body || '{}')
-        const identity = normalizeField(payload.identity)
-        const password = normalizeField(payload.password)
+        const site = capturedSite(payload)
+        const identity = site.identity
+        const password = payload.password == null ? '' : String(payload.password)
         const username = normalizeField(payload.username) || null
-        const displayName = normalizeField(payload.display_name) || identity
 
         if (!identity || !password) {
           sendJson(res, 400, { ok: false, error: 'Invalid payload' })
@@ -110,7 +111,10 @@ export function initBridgeServer(winWebContents) {
         let changed = false
 
         if (existing) {
-          const result = updateCredential({
+          const result = updateApp({
+            ...site,
+            // Keep a cached icon if the site's icon is temporarily unavailable.
+            icon_data: site.icon_data || existing.icon_data,
             app_id: existing.id,
             username,
             password
@@ -118,8 +122,7 @@ export function initBridgeServer(winWebContents) {
           changed = result.updated
         } else {
           createApp({
-            identity,
-            display_name: displayName,
+            ...site,
             category: 'web',
             username,
             password
