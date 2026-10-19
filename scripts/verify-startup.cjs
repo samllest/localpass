@@ -6,7 +6,7 @@ const path = require('node:path')
 const { spawn, spawnSync } = require('node:child_process')
 
 if (process.versions.electron) {
-  const { app, dialog } = require('electron')
+  const { app, dialog, Menu, BrowserWindow } = require('electron')
   const { pathToFileURL } = require('node:url')
   app.setPath('userData', process.env.LOCALPASS_STARTUP_PROFILE)
   app.commandLine.appendSwitch('in-process-gpu')
@@ -29,6 +29,30 @@ if (process.versions.electron) {
         const response = await fetch(`http://127.0.0.1:${port}/lookup?identity=fixture.example`)
         assert.equal(response.status, 423)
         assert.deepEqual((await response.json()).accounts, [])
+        const db = await import(pathToFileURL(path.join(__dirname, '../src/main/db.js')))
+        db.initDB('background-fixture.db', { createIfMissing: true })
+        db.setMasterPassword('Synthetic!Startup123', 'fixture-salt')
+        const hidden = new BrowserWindow({ show: false })
+        hidden.hide()
+        const captured = await fetch(`http://127.0.0.1:${port}/capture`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            page_url: 'https://fixture.example/login',
+            username: 'fixture',
+            password: 'Synthetic!Capture123'
+          })
+        })
+        assert.equal(captured.status, 200)
+        const lookup = await fetch(`http://127.0.0.1:${port}/lookup?identity=fixture.example`)
+        assert.equal((await lookup.json()).accounts[0].password, 'Synthetic!Capture123')
+        db.closeVault()
+        assert.equal(
+          (await fetch(`http://127.0.0.1:${port}/lookup?identity=fixture.example`)).status,
+          423
+        )
+        hidden.destroy()
+        console.log('PASS a hidden desktop can save and fill; locking the vault disables lookup')
         await bridge.closeBridgeServer()
         await new Promise((resolve) => occupied.listen(port, '127.0.0.1', resolve))
         await new Promise((resolve) => occupied.close(resolve))
@@ -40,6 +64,16 @@ if (process.versions.electron) {
         app.exit(1)
       })
   } else {
+    let closeAnswer = { response: 0, checkboxChecked: false }
+    let testWindow, trayItems
+    let closePrompts = 0,
+      hideCalls = 0,
+      showCalls = 0
+    const buildMenu = Menu.buildFromTemplate.bind(Menu)
+    Menu.buildFromTemplate = (items) => {
+      if (items.some((item) => item.label === '退出 LocalPass')) trayItems = items
+      return buildMenu(items)
+    }
     // Keep all synthetic databases outside the project and the user's installed vault.
     app.getAppPath = () => process.env.LOCALPASS_STARTUP_PROFILE
     dialog.showErrorBox = (title) => {
@@ -48,11 +82,23 @@ if (process.versions.electron) {
     }
     dialog.showMessageBox = async (_window, options) => {
       process.send?.({ type: 'notice', title: options.title, detail: options.detail })
+      if (options.title === '关闭 LocalPass') {
+        closePrompts++
+        return closeAnswer
+      }
       return { response: 0 }
     }
     app.on('second-instance', () => process.send?.({ type: 'second-instance' }))
     app.on('browser-window-created', (_event, window) => {
-      window.show = () => {}
+      testWindow = window
+      window.show = () => {
+        showCalls++
+      }
+      const hide = window.hide.bind(window)
+      window.hide = () => {
+        hideCalls++
+        hide()
+      }
       window.webContents.once('did-finish-load', async () => {
         try {
           const registered = await window.webContents.executeJavaScript(
@@ -61,6 +107,19 @@ if (process.versions.electron) {
           assert.equal(registered.success, true)
           const listed = await window.webContents.executeJavaScript('window.localpass.listApps()')
           assert.deepEqual(listed, [])
+          await window.webContents.executeJavaScript(`(async () => {
+            for (const [selector, value] of [['#username', 'startup-fixture'], ['#master-pwd', 'Synthetic!Startup123']]) {
+              const input = document.querySelector(selector)
+              input.value = value
+              input.dispatchEvent(new Event('input', { bubbles: true }))
+            }
+            document.querySelector('.unlock-form').requestSubmit()
+            for (let retry = 0; retry < 100; retry++) {
+              if (document.querySelector('.manager-nav')) return
+              await new Promise(resolve => setTimeout(resolve, 30))
+            }
+            throw new Error('Synthetic UI login did not finish')
+          })()`)
           process.send?.({ type: 'ready' })
         } catch (error) {
           console.error(error)
@@ -70,6 +129,60 @@ if (process.versions.electron) {
     })
     process.on('message', (message) => {
       if (message === 'quit') app.quit()
+      if (message === 'exercise-close') {
+        ;(async () => {
+          const pause = () => new Promise((resolve) => setTimeout(resolve, 120))
+          testWindow.close()
+          await pause()
+          assert.equal(testWindow.isDestroyed(), false)
+          assert.equal(hideCalls, 0)
+          closeAnswer = { response: 2, checkboxChecked: true }
+          testWindow.close()
+          await pause()
+          assert.equal(hideCalls, 1)
+          assert.ok(trayItems)
+          const preference = await testWindow.webContents.executeJavaScript(
+            'window.localpass.getClosePreference()'
+          )
+          assert.equal(preference.action, 'background')
+          const promptsBeforeReuse = closePrompts
+          testWindow.close()
+          await pause()
+          assert.equal(hideCalls, 2)
+          assert.equal(closePrompts, promptsBeforeReuse)
+          const showsBeforeTray = showCalls
+          trayItems[0].click()
+          assert.ok(showCalls > showsBeforeTray)
+          await testWindow.webContents.executeJavaScript('window.localpass.resetClosePreference()')
+          assert.equal(
+            await testWindow.webContents.executeJavaScript('window.localpass.getClosePreference()'),
+            null
+          )
+          // Verify the settings action is connected through the real preload and renderer.
+          await testWindow.webContents.executeJavaScript(
+            `document.querySelectorAll('.manager-nav')[2].click()`
+          )
+          await pause()
+          const ui = await testWindow.webContents.executeJavaScript(
+            `({ text: document.body.innerText, overflow: document.documentElement.scrollWidth > innerWidth })`
+          )
+          assert.ok(ui.text.includes('恢复关闭提示'))
+          assert.equal(ui.overflow, false)
+          closeAnswer = { response: 0, checkboxChecked: false }
+          testWindow.close()
+          await pause()
+          assert.equal(closePrompts, promptsBeforeReuse + 1)
+          assert.equal(hideCalls, 2)
+          process.send?.({ type: 'close-tested' })
+        })().catch((error) => {
+          console.error(error)
+          app.exit(1)
+        })
+      }
+      if (message === 'confirm-close') {
+        closeAnswer = { response: 1, checkboxChecked: false }
+        testWindow.close()
+      }
     })
     require(process.env.LOCALPASS_STARTUP_ENTRY || path.join(__dirname, '../out/main/index.js'))
   }
@@ -89,9 +202,17 @@ if (process.versions.electron) {
     env: { ...env, LOCALPASS_STARTUP_MODE: 'bridge' },
     stdio: 'inherit',
     windowsHide: true,
-    timeout: 30000
+    timeout: 60000
   })
-  if (bridgeCheck.status !== 0) process.exit(bridgeCheck.status || 1)
+  if (bridgeCheck.status !== 0) {
+    console.error(
+      'Bridge integration process failed:',
+      bridgeCheck.status,
+      bridgeCheck.signal,
+      bridgeCheck.error?.message
+    )
+    process.exit(1)
+  }
   const http = require('node:http')
   let first, duplicate, occupied
   const events = []
@@ -139,6 +260,11 @@ if (process.versions.electron) {
     console.log(
       'PASS actual desktop entry loads and creates a synthetic vault while its bridge port is occupied'
     )
+    first.send('exercise-close')
+    await waitFor(() => events.some((event) => event.type === 'close-tested'))
+    console.log(
+      'PASS real close events cancel/hide, create a tray, remember choices and reset through settings IPC'
+    )
     duplicate = spawn(electron, [__filename], options)
     duplicate.stdout.resume()
     duplicate.stderr.resume()
@@ -149,7 +275,7 @@ if (process.versions.electron) {
     console.log(
       'PASS launching the actual entry again exits cleanly and activates the original process'
     )
-    first.send('quit')
+    first.send('confirm-close')
     assert.equal(await new Promise((resolve) => first.once('exit', resolve)), 0)
   })()
     .catch((error) => {

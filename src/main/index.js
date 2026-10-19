@@ -1,4 +1,4 @@
-﻿import { app, shell, BrowserWindow, ipcMain, clipboard } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, clipboard, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
 import { readFile, writeFile } from 'fs/promises'
 import { dialog } from 'electron'
@@ -19,11 +19,13 @@ import {
   getHistory,
   exportVaultData,
   importVaultData,
-  setMasterPassword
+  setMasterPassword,
+  isVaultUnlocked
 } from './db'
 import { initBridgeServer, closeBridgeServer } from './bridge'
 import { initializeStorage } from './storage'
 import { acquireSingleInstance } from './single-instance'
+import { createCloseController, readClosePreference, clearClosePreference } from './close-behavior'
 
 // 兼容从受限环境（注入了宿主 Electron 环境变量的会话）启动：
 // GPU 子进程派生会崩溃（0xC0000005），改为主进程内软件渲染，普通桌面环境无感知差异
@@ -35,6 +37,43 @@ let mainWindow
 let clipboardClearTimer = null
 let currentUsername = null
 const hasInstanceLock = acquireSingleInstance(app, () => mainWindow)
+let tray = null
+const closePreferenceFile = join(app.getPath('userData'), 'close-preference.json')
+const closeController = createCloseController({
+  app,
+  dialog,
+  isUnlocked: isVaultUnlocked,
+  preferenceFile: closePreferenceFile,
+  enterBackground: () => {
+    if (tray && !tray.isDestroyed()) return
+    const icon = nativeImage.createFromPath(join(__dirname, '../../build/icon.png'))
+    if (icon.isEmpty()) throw new Error('Tray icon unavailable')
+    const candidate = new Tray(icon.resize({ width: 16, height: 16 }))
+    try {
+      candidate.setToolTip('LocalPass · 本地密码管理器')
+      candidate.setContextMenu(
+        Menu.buildFromTemplate([
+          { label: '打开 LocalPass', click: showMainWindow },
+          { type: 'separator' },
+          { label: '退出 LocalPass', click: () => closeController.quit() }
+        ])
+      )
+      candidate.on('click', showMainWindow)
+      candidate.on('double-click', showMainWindow)
+      tray = candidate
+    } catch (error) {
+      candidate.destroy()
+      throw error
+    }
+  }
+})
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -52,6 +91,7 @@ function createWindow() {
     }
   })
 
+  closeController.attach(mainWindow)
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
@@ -151,6 +191,8 @@ app
       const error = await shell.openPath(folder)
       if (error) throw new Error('无法打开扩展目录：' + error)
     })
+    ipcMain.handle('window:closePreference', () => readClosePreference(closePreferenceFile))
+    ipcMain.handle('window:resetClosePreference', () => clearClosePreference(closePreferenceFile))
     ipcMain.handle('vault:export', async () => {
       const result = await dialog.showSaveDialog(mainWindow, {
         title: '导出加密密码库',
@@ -216,6 +258,7 @@ app
 
     app.on('activate', function () {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      else showMainWindow()
     })
   })
   .catch((error) => {
@@ -224,6 +267,9 @@ app
   })
 
 app.on('before-quit', () => {
+  closeController.allowQuit()
+  tray?.destroy()
+  tray = null
   void closeBridgeServer()
   closeVault()
   currentUsername = null

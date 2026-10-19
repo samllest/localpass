@@ -7,6 +7,8 @@ const api = {
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
+  getClosePreference: () => ipcRenderer.invoke('window:closePreference'),
+  resetClosePreference: () => ipcRenderer.invoke('window:resetClosePreference'),
 
   // Authentication
   register: (username, password) => ipcRenderer.invoke('auth:register', username, password),

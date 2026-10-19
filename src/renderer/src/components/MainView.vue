@@ -321,6 +321,20 @@
                   </div>
                   <span class="status-label"><span />已启用</span>
                 </div>
+                <div class="preference-row">
+                  <div>
+                    <strong>关闭窗口</strong>
+                    <p>{{ closePreferenceDescription }}</p>
+                    <p>后台运行且密码库已解锁时，浏览器扩展可继续保存和填充密码。</p>
+                  </div>
+                  <button
+                    class="button button-outline"
+                    :disabled="closePreferenceBusy"
+                    @click="resetClosePreference"
+                  >
+                    恢复关闭提示
+                  </button>
+                </div>
               </section>
               <h2 class="section-title">当前密码库</h2>
               <section class="settings-card">
@@ -486,6 +500,15 @@ const deleting = ref(false)
 const backupBusy = ref(false)
 const vaultInfo = ref(null)
 const vaultInfoError = ref('')
+const closePreference = ref(null)
+const closePreferenceBusy = ref(false)
+const closePreferenceDescription = computed(() => {
+  const preference = closePreference.value
+  if (!preference || preference.expiresAt <= Date.now())
+    return '每次关闭时询问：取消、确认关闭或后台运行'
+  const action = preference.action === 'background' ? '后台运行' : '确认关闭'
+  return `关闭时自动选择「${action}」，${new Date(preference.expiresAt).toLocaleString('zh-CN', { hour12: false })} 后重新提示`
+})
 const locking = ref(false)
 const toast = ref(null)
 const riskFilter = ref('')
@@ -547,6 +570,7 @@ async function refreshApps() {
   }
 }
 function navigate(destination) {
+  if (destination === 'settings') void loadClosePreference()
   page.value = destination
   selectedKey.value = null
   batchMode.value = false
@@ -724,6 +748,25 @@ async function openExtensionFolder() {
     showToast(error.message || '打开扩展目录失败', 'error')
   }
 }
+async function loadClosePreference() {
+  try {
+    closePreference.value = await window.localpass.getClosePreference()
+  } catch (error) {
+    showToast(error.message || '读取关闭偏好失败', 'error')
+  }
+}
+async function resetClosePreference() {
+  closePreferenceBusy.value = true
+  try {
+    await window.localpass.resetClosePreference()
+    closePreference.value = null
+    showToast('已恢复，下次关闭时会重新询问')
+  } catch (error) {
+    showToast(error.message || '恢复关闭提示失败', 'error')
+  } finally {
+    closePreferenceBusy.value = false
+  }
+}
 async function runCheck() {
   if (await refreshApps()) showToast('密码检查已完成')
 }
@@ -765,6 +808,8 @@ onMounted(() => {
   applyTheme()
   refreshApps()
   loadVaultInfo()
+  loadClosePreference()
+  window.addEventListener('focus', loadClosePreference)
   document.addEventListener('keydown', onKeydown)
   systemTheme.addEventListener('change', applyTheme)
   wideLayout.addEventListener('change', onLayoutChange)
@@ -773,6 +818,7 @@ onMounted(() => {
   })
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('focus', loadClosePreference)
   refreshToken++
   clearTimeout(toastTimer)
   stopRefreshListener?.()

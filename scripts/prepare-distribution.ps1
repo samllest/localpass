@@ -32,6 +32,9 @@ Windows 安装版数据库通常位于 %APPDATA%\localpass\databases。
 更新前请在设置中导出加密备份，卸载或更换电脑前保留完整的数据目录。
 当前加密备份需要原密码库的加密密钥，恢复时应保留原 system.db 与 user_*.db 文件。
 更新插件后，需要重新加载扩展并刷新网站页面。
+关闭窗口时可选择取消、确认关闭或后台运行。后台运行且密码库已解锁时，扩展才能继续保存和填充密码。
+勾选“不再提示”会记住本次退出或后台运行选择 3 天，取消不记忆。可在设置中“恢复关闭提示”。
+托盘菜单可重新打开窗口或退出应用；退出后扩展不会暂存登录密码。
 "@
 [System.IO.File]::WriteAllText((Join-Path $site '使用说明.txt'), $guide, $utf8)
 $checksums = @($installerName, $extensionName) | ForEach-Object {
