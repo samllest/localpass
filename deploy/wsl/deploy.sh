@@ -16,6 +16,6 @@ docker compose -f "$deploy_dir/compose.yaml" up -d --force-recreate
 binding="$(docker compose -f "$deploy_dir/compose.yaml" port downloads 80)"
 binding="${binding%%$'\n'*}"
 health_port="${binding##*:}"
-curl --fail --retry 10 --retry-delay 1 --retry-connrefused "http://127.0.0.1:$health_port/health"
+curl --noproxy '*' --fail --retry 10 --retry-delay 1 --retry-connrefused "http://127.0.0.1:$health_port/health"
 echo "LocalPass distribution backend is running at http://localhost:$health_port/"
 echo "Deployment directory: $deploy_dir"
