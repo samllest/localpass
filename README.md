@@ -52,6 +52,8 @@ The packaged application is independently deployable. It stores vault databases 
 
 The bridge listens only on `127.0.0.1:35320`. It rejects capture and lookup requests while the vault is locked.
 
+From desktop version 1.2.1, launching again activates the existing window instead of starting another bridge. If a development build or another program occupies the bridge port, the desktop shows a Chinese notice and keeps the vault usable. Close the other LocalPass instance and restart to restore the extension connection. `npm run test:startup` checks duplicate launches and occupied ports with a disposable profile.
+
 The account picker opens only when a login username or password field is focused or clicked. Selecting an account, leaving the field, pressing Escape, submitting the login, or navigating away closes it. Page mutations never reopen it, and stale lookup responses are ignored.
 
 After changing extension code, reload LocalPass in `chrome://extensions` and refresh the website tab. Restarting the desktop app alone does not update scripts already injected into a tab.

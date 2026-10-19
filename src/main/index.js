@@ -21,8 +21,9 @@ import {
   importVaultData,
   setMasterPassword
 } from './db'
-import { initBridgeServer } from './bridge'
+import { initBridgeServer, closeBridgeServer } from './bridge'
 import { initializeStorage } from './storage'
+import { acquireSingleInstance } from './single-instance'
 
 // 兼容从受限环境（注入了宿主 Electron 环境变量的会话）启动：
 // GPU 子进程派生会崩溃（0xC0000005），改为主进程内软件渲染，普通桌面环境无感知差异
@@ -33,6 +34,7 @@ app.disableHardwareAcceleration()
 let mainWindow
 let clipboardClearTimer = null
 let currentUsername = null
+const hasInstanceLock = acquireSingleInstance(app, () => mainWindow)
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -61,7 +63,24 @@ function createWindow() {
     return { action: 'deny' }
   })
 
-  initBridgeServer(mainWindow.webContents)
+  const window = mainWindow
+  initBridgeServer(window.webContents).catch((error) => {
+    console.error('[Bridge] Unable to start browser connection:', error.code || error.message)
+    if (window.isDestroyed()) return
+    const detail =
+      error.code === 'EADDRINUSE'
+        ? '本机连接端口 35320 已被占用。请关闭其他 LocalPass 窗口（包括开发版），然后重新打开此程序。密码库仍可正常使用。'
+        : '暂时无法连接浏览器扩展，请重新启动 LocalPass。密码库仍可正常使用。'
+    dialog
+      .showMessageBox(window, {
+        type: 'warning',
+        title: '浏览器连接暂不可用',
+        message: '浏览器扩展暂时无法连接此窗口',
+        detail,
+        buttons: ['知道了']
+      })
+      .catch((dialogError) => console.error('[Bridge] Unable to show notice:', dialogError.message))
+  })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -73,6 +92,7 @@ function createWindow() {
 app
   .whenReady()
   .then(async () => {
+    if (!hasInstanceLock) return
     await initializeStorage()
     initSystemDb()
 
@@ -204,6 +224,7 @@ app
   })
 
 app.on('before-quit', () => {
+  void closeBridgeServer()
   closeVault()
   currentUsername = null
 })

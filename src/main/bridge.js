@@ -11,6 +11,7 @@ import { capturedSite } from '../shared/site-metadata.js'
 
 let webContents = null
 let server = null
+let startPromise = null
 const MAX_CAPTURE_BODY_BYTES = 64 * 1024
 
 function normalizeField(value) {
@@ -22,14 +23,13 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload))
 }
 
-export function initBridgeServer(winWebContents) {
+export function initBridgeServer(winWebContents, { port = 35320 } = {}) {
   webContents = winWebContents
 
   if (server) {
-    return
+    return startPromise
   }
 
-  const port = 35320
   server = createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
@@ -130,7 +130,7 @@ export function initBridgeServer(winWebContents) {
           changed = true
         }
 
-        if (changed && webContents) {
+        if (changed && webContents && !webContents.isDestroyed()) {
           webContents.send('app:refreshList')
         }
 
@@ -142,7 +142,34 @@ export function initBridgeServer(winWebContents) {
     })
   })
 
-  server.listen(port, '127.0.0.1', () => {
-    console.log(`[Bridge Server] Listening on 127.0.0.1:${port}`)
+  const listener = server
+  startPromise = new Promise((resolve, reject) => {
+    const onStartupError = (error) => {
+      if (server === listener) {
+        server = null
+        startPromise = null
+      }
+      reject(error)
+    }
+    listener.once('error', onStartupError)
+    listener.listen(port, '127.0.0.1', () => {
+      listener.removeListener('error', onStartupError)
+      listener.on('error', (error) => console.error('[Bridge] Server error:', error))
+      console.log(`[Bridge Server] Listening on 127.0.0.1:${listener.address().port}`)
+      resolve()
+    })
+  })
+  return startPromise
+}
+
+export function closeBridgeServer() {
+  const listener = server
+  server = null
+  startPromise = null
+  webContents = null
+  if (!listener) return Promise.resolve()
+  return new Promise((resolve) => {
+    listener.close(() => resolve())
+    listener.closeAllConnections()
   })
 }

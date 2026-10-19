@@ -11,6 +11,7 @@ npm install
 npm test
 npm run test:site-data
 npm run test:extension
+npm run test:startup
 npm run build:win
 npm run package:distribution
 ```
@@ -61,5 +62,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-wsl-downlo
 3. 打开开发者模式，加载解压后的 `chrome-extension` 文件夹。桌面端设置中也提供内置扩展目录入口。
 4. 保持桌面端解锁，刷新网站并登录一次。后续可在登录框选择已保存的账号。
 5. 更新插件后重新加载扩展，并刷新网站。
+
+### 1.2.1 启动修复
+
+1.2.0 同时打开多个窗口时，可能因浏览器连接端口 `35320` 已被占用而弹出主进程 JavaScript 错误。1.2.1 会在再次启动时激活已有窗口；开发版或其他程序占用端口时显示中文说明，密码库功能保持可用。更新前先正常关闭已运行的 LocalPass（包括开发版），再运行新版安装包覆盖安装，保留原数据目录。浏览器扩展仍为 1.2.0，无需更新。
 
 Windows 安装版的数据通常位于 `%APPDATA%\localpass\databases`。开发版使用项目的 `.localpass-data/databases`。更新或迁移前保留完整数据目录，并在设置中导出加密备份；当前备份解密需要原密码库的密钥，应一并保留原 `system.db` 与 `user_*.db` 文件。

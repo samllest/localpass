@@ -1,6 +1,6 @@
 {
   "name": "localpass",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "LocalPass 本地加密密码管理器与浏览器登录助手",
   "main": "./out/main/index.js",
   "author": "samllest",
@@ -19,7 +19,8 @@
     "build:win": "node scripts/build-windows.cjs",
     "package:distribution": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-distribution.ps1",
     "build:mac": "npm run build && electron-builder --mac",
-    "build:linux": "npm run build && electron-builder --linux"
+    "build:linux": "npm run build && electron-builder --linux",
+    "test:startup": "npm run build && node scripts/verify-startup.cjs"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
