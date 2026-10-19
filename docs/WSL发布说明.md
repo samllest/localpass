@@ -70,6 +70,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-wsl-downlo
 
 容器仅监听 WSL 内部的 `127.0.0.1:18771`；Windows 监听指定局域网 IP 和本机 `127.0.0.1` 的 TCP 18770，转发到内部端口。Windows 防火墙只允许 `LocalSubnet` 访问该端口，适用于当前网络为 Public 的情况。对外访问地址仍为 `http://192.168.3.145:18770/`，本机为 `http://localhost:18770/`。规则在重启后保留；若主机局域网 IP 改变，应先删除旧地址转发，再用新 IP 执行命令。Windows IP Helper 服务需保持运行。`deploy.sh` 会保留 `.env` 并从容器实际映射端口执行健康检查。
 
+WSL 重启后，如果内部 `http://127.0.0.1:18771/health` 正常，但局域网入口拒绝连接，检查 Windows 是否实际监听局域网地址：
+
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 18770
+```
+
+若只显示 `127.0.0.1`，在管理员 PowerShell 重新执行上述配置脚本，重建局域网监听。若仍未监听，可执行 `Restart-Service iphlpsvc -Force` 后再次检查；这会短暂中断此主机其他 Windows 端口转发连接。
+
 撤销这条局域网转发（管理员 PowerShell）：
 
 ```powershell

@@ -28,6 +28,8 @@ if ($FirewallOnly) {
     if (-not (Get-NetIPAddress -IPAddress $LanAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue)) {
       throw 'LanAddress is not assigned to this Windows host.'
     }
+    # Recreate existing listeners: updating a stale rule may leave it unbound.
+    & netsh.exe interface portproxy delete v4tov4 "listenaddress=$LanAddress" "listenport=$Port" protocol=tcp 2>$null | Out-Null
     # Bind only the LAN address. The loopback destination remains the WSL service.
     & netsh.exe interface portproxy add v4tov4 "listenaddress=$LanAddress" "listenport=$Port" connectaddress=127.0.0.1 "connectport=$BackendPort" protocol=tcp
     if ($LASTEXITCODE -ne 0) { throw 'Unable to configure the LAN port forward.' }
