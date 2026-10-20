@@ -18,6 +18,7 @@ if ((Get-Content -LiteralPath $updateMetadata -Raw) -notmatch "(?m)^version: $([
 }
 $site = Join-Path $projectRoot 'dist/downloads/site'
 New-Item -ItemType Directory -Path $site -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $projectRoot 'build/icon.svg') -Destination (Join-Path $site 'icon.svg') -Force
 Copy-Item -LiteralPath $installer -Destination (Join-Path $site $installerName) -Force
 Copy-Item -LiteralPath $updateMetadata -Destination (Join-Path $site 'latest.yml') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "dist/release/$blockmapName") -Destination (Join-Path $site $blockmapName) -Force
@@ -31,7 +32,7 @@ $html = $template.Replace('__EXTENSION_VERSION__', $extensionVersion).Replace('_
 $guide = @"
 LocalPass $version 使用说明
 
-桌面端 1.4.3 还原新版界面，修复输入文字底部裁切；插件 1.3.1 修复账号选择窗口重复弹出。
+桌面端 $version 更新产品 Logo、Windows 安装与窗口图标；插件 $extensionVersion 增加扩展图标。
 
 1. 运行 $installerName 安装桌面端，然后注册自己的本地账号与主密码。
 2. 解压 $extensionName，保留其中 chrome-extension 文件夹。

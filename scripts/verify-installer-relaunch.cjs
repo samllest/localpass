@@ -26,7 +26,8 @@ async function spawnReady(executable, args, options) {
       })
       return child
     } catch (error) {
-      if (attempt >= 9 || !['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) throw error
+      if (attempt >= 9 || !['EBUSY', 'EPERM', 'EACCES', 'UNKNOWN'].includes(error.code))
+        throw error
       await new Promise((resolve) => setTimeout(resolve, 2000))
     }
   }

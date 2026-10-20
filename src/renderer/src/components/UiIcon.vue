@@ -1,5 +1,16 @@
 <template>
+  <img
+    v-if="brandSize"
+    class="ui-icon brand-icon"
+    :src="brandLogo"
+    :width="brandSize"
+    :height="brandSize"
+    alt=""
+    aria-hidden="true"
+    draggable="false"
+  />
   <svg
+    v-else
     class="ui-icon"
     :width="icon.w"
     :height="icon.h"
@@ -16,8 +27,12 @@ import { computed } from 'vue'
 import { ICONS } from './icons.js'
 import { WORKSPACE_ICONS } from './workspace-icons'
 import { ARDOT_ICONS } from './ardot-icons'
+import brandLogo from '../../../../build/icon.svg?url'
 
 const props = defineProps({ name: { type: String, required: true } })
+const brandSize = computed(
+  () => ({ 'brand-titlebar': 24, 'brand-sidebar': 36, 'logo-lock': 52 })[props.name]
+)
 
 const icon = computed(() => {
   const item = ARDOT_ICONS[props.name] || WORKSPACE_ICONS[props.name] || ICONS[props.name]

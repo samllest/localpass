@@ -35,6 +35,7 @@ function installedPackage(name) {
   }
   throw new Error('Cannot locate installed package: ' + name)
 }
+run(process.execPath, [npmCli, 'run', 'build:icons'], root)
 run(process.execPath, [npmCli, 'run', 'build'], root)
 const dependencies = Object.fromEntries(
   Object.keys(pkg.dependencies).map((name) => [name, installedPackage(name).manifest.version])

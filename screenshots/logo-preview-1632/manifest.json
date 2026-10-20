@@ -1,0 +1,413 @@
+{
+  "capturedAt": "2026-10-20T08:38:26.332Z",
+  "source": "http://localhost:5173/",
+  "fixtureData": true,
+  "requiredPages": [
+    "登录",
+    "注册",
+    "密码管理",
+    "密码检查",
+    "设置"
+  ],
+  "captures": [
+    {
+      "filename": "01-login.png",
+      "title": "登录 / 解锁密码库",
+      "page": "登录",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "02-register.png",
+      "title": "注册独立密码库",
+      "page": "注册",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "03-password-manager.png",
+      "title": "密码管理 · 全部密码",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "04-website-filter.png",
+      "title": "密码管理 · 网站筛选",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "05-application-filter.png",
+      "title": "密码管理 · 应用筛选",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "06-search-results.png",
+      "title": "搜索 · 匹配结果",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "07-search-empty.png",
+      "title": "搜索 · 无匹配结果",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "08-single-account-details.png",
+      "title": "网站详情 · 单账号",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "09-password-history.png",
+      "title": "网站详情 · 密码历史版本",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "10-multiple-accounts.png",
+      "title": "网站详情 · 多账号",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "11-development-project.png",
+      "title": "开发环境 · 端口与项目名称",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "12-batch-selection.png",
+      "title": "密码管理 · 批量选择",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "13-delete-confirmation.png",
+      "title": "删除确认弹窗（未执行删除）",
+      "page": "弹窗",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": [
+        {
+          "height": 255,
+          "viewport": 900
+        }
+      ]
+    },
+    {
+      "filename": "14-add-website.png",
+      "title": "添加密码 · 网站",
+      "page": "弹窗",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": [
+        {
+          "height": 620,
+          "viewport": 900
+        }
+      ]
+    },
+    {
+      "filename": "15-add-application.png",
+      "title": "添加密码 · 应用",
+      "page": "弹窗",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": [
+        {
+          "height": 620,
+          "viewport": 900
+        }
+      ]
+    },
+    {
+      "filename": "16-add-development-project.png",
+      "title": "添加密码 · 开发项目",
+      "page": "弹窗",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": [
+        {
+          "height": 737,
+          "viewport": 900
+        }
+      ]
+    },
+    {
+      "filename": "17-edit-password.png",
+      "title": "编辑密码",
+      "page": "弹窗",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": [
+        {
+          "height": 730,
+          "viewport": 900
+        }
+      ]
+    },
+    {
+      "filename": "18-add-site-account.png",
+      "title": "为已有网站添加账号",
+      "page": "弹窗",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": [
+        {
+          "height": 703,
+          "viewport": 900
+        }
+      ]
+    },
+    {
+      "filename": "19-password-checkup.png",
+      "title": "密码检查 · 总览",
+      "page": "密码检查",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "20-weak-passwords.png",
+      "title": "密码检查 · 弱密码列表",
+      "page": "密码检查",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "21-reused-passwords.png",
+      "title": "密码检查 · 重复密码列表",
+      "page": "密码检查",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "22-settings-top.png",
+      "title": "设置 · 外观、关闭行为与密码库",
+      "page": "设置",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "23-settings-middle.png",
+      "title": "设置 · 数据导入导出与浏览器扩展",
+      "page": "设置",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "24-settings-bottom.png",
+      "title": "设置 · 浏览器扩展与版本更新",
+      "page": "设置",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "25-extension-instructions.png",
+      "title": "设置 · 扩展安装说明展开",
+      "page": "设置",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "26-update-server-settings.png",
+      "title": "设置 · 内网更新地址展开",
+      "page": "设置",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "27-update-available.png",
+      "title": "更新通知 · 发现新版本（示例状态）",
+      "page": "更新状态",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "28-update-progress.png",
+      "title": "更新通知 · 下载进度（示例状态）",
+      "page": "更新状态",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "29-update-ready.png",
+      "title": "更新通知 · 下载完成（示例状态）",
+      "page": "更新状态",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "30-empty-vault.png",
+      "title": "密码管理 · 空密码库",
+      "page": "密码管理",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "31-empty-checkup.png",
+      "title": "密码检查 · 空密码库",
+      "page": "密码检查",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "32-dark-password-manager.png",
+      "title": "深色主题 · 密码管理",
+      "page": "深色主题",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "33-dark-checkup.png",
+      "title": "深色主题 · 密码检查",
+      "page": "深色主题",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "34-dark-settings.png",
+      "title": "深色主题 · 设置",
+      "page": "深色主题",
+      "width": 1440,
+      "height": 900,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "35-project-fill-choice.png",
+      "title": "开发项目 · 填充账号选择",
+      "page": "独立弹窗",
+      "width": 498,
+      "height": 554,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "36-project-save-choice.png",
+      "title": "开发项目 · 保存对象选择",
+      "page": "独立弹窗",
+      "width": 498,
+      "height": 554,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "37-compact-list.png",
+      "title": "小窗口 · 密码列表",
+      "page": "窗口适配",
+      "width": 980,
+      "height": 760,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "38-compact-details.png",
+      "title": "小窗口 · 网站详情",
+      "page": "窗口适配",
+      "width": 980,
+      "height": 760,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "39-compact-checkup-list.png",
+      "title": "小窗口 · 检查列表",
+      "page": "窗口适配",
+      "width": 980,
+      "height": 760,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "40-compact-checkup-detail.png",
+      "title": "小窗口 · 检查详情",
+      "page": "窗口适配",
+      "width": 980,
+      "height": 760,
+      "horizontalOverflow": false,
+      "dialogs": []
+    },
+    {
+      "filename": "41-narrow-settings.png",
+      "title": "窄窗口 · 设置",
+      "page": "窗口适配",
+      "width": 620,
+      "height": 760,
+      "horizontalOverflow": false,
+      "dialogs": []
+    }
+  ]
+}

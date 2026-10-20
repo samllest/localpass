@@ -1,90 +1,107 @@
+<div align="center">
+
+<img src="build/icon.png" width="96" alt="LocalPass 图标">
+
 # LocalPass
 
-LocalPass is a Windows-first Electron password manager with an encrypted local vault and a Chrome extension for login capture and optional account selection autofill.
+**本地优先的密码管理器与浏览器登录助手**
 
-## Features
+在桌面端管理账号和密码，让浏览器扩展在需要时帮你保存与填写登录信息。
 
-- AES-256-GCM encryption for stored passwords; the vault key is derived from the master password with scrypt.
-- Multiple accounts for the same website identity.
-- Version history for password updates.
-- Chrome extension login capture through the localhost bridge.
-- Chrome extension account picker that fills the selected username and password.
-- Chrome-inspired three-column workspace with a persistent website list and account details, plus password checkup and settings. Narrow windows switch between the list and details.
-- Website names, browser tab titles, cached local favicons, and complete addresses with ports.
-- Search by website, display name, tab title, port, or username; group multiple accounts and sort by name or latest update.
-- Local checks for reused and weak passwords, with links to affected accounts (no online breach check).
-- Cryptographically generated passwords, masked version history, and confirmed individual or batch deletion.
-- Light, dark, and system themes; keyboard search with Ctrl/Cmd+K and accessible dialogs.
-- Encrypted vault backup import/export. Backups currently require the original vault's encryption key.
+[功能概览](#功能概览) · [界面截图](#界面截图) · [快速开始](#快速开始) · [数据与安全](#数据与安全) · [开发](#开发)
 
-## Development
+</div>
 
-Requirements: Node.js 20 or newer and npm.
+---
+
+## 项目介绍
+
+LocalPass 是一款面向 Windows 桌面端的本地密码管理器。密码库保存在使用者自己的电脑上，桌面应用通过本机连接与 Chrome 扩展配合，捕获登录信息并在网站登录时提供账号选择。
+
+LocalPass 不要求注册云服务账号，也不把密码上传到下载服务器。当前版本没有跨设备在线同步；迁移设备请保留完整的本地密码库目录，详情见[数据与安全](#数据与安全)。
+
+## 功能概览
+
+| 功能 | 说明 |
+| --- | --- |
+| 本地加密密码库 | 使用独立账号和主密码解锁本机 SQLite 密码库，密码字段使用 AES-256-GCM 加密 |
+| 浏览器登录助手 | Chrome 扩展可捕获登录表单并提供账号选择；桌面端需运行且密码库已解锁 |
+| 多账号与密码历史 | 同一网站或应用可保存多个账号，修改密码后保留历史版本 |
+| 网站与开发项目识别 | 记录网站名称、标签页标题、完整地址和端口；开发环境可按主机、端口与项目名称区分 |
+| 密码检查 | 在本机检查重复密码和较弱密码，不连接在线泄露数据库 |
+| 密码生成与复制保护 | 生成随机密码；复制的密码在 30 秒后清除剪贴板（仅当剪贴板内容未被替换） |
+| 桌面使用体验 | 支持浅色、深色和系统主题；可后台运行并通过系统托盘重新打开或退出 |
+| 应用内更新 | 从管理员配置的下载站检查更新，下载与安装由使用者确认 |
+
+## 界面截图
+
+截图使用隔离的示例账号，不含真实密码库数据。
+
+| 密码管理 | 密码检查 | 设置与更新 |
+| --- | --- | --- |
+| ![LocalPass 密码管理界面](screenshots/logo-preview-1632/03-password-manager.png) | ![LocalPass 密码检查界面](screenshots/logo-preview-1632/19-password-checkup.png) | ![LocalPass 设置界面](screenshots/logo-preview-1632/26-update-server-settings.png) |
+
+更多页面状态见 [41 张界面截图索引](screenshots/logo-preview-1632/index.html)。
+
+## 快速开始
+
+### 安装桌面端
+
+在局域网内打开 [LocalPass 下载页](http://192.168.3.145:18770/)，下载并运行 Windows 安装包，然后创建自己的 LocalPass 账号和主密码。每位使用者都应使用自己的账号和密码库。
+
+### 安装 Chrome 扩展
+
+1. 从下载页获取并解压 LocalPass 扩展压缩包。
+2. 在 Chrome 打开 `chrome://extensions/`，开启“开发者模式”。
+3. 选择“加载已解压的扩展程序”，指定解压后的 `chrome-extension` 文件夹。
+4. 启动 LocalPass 并解锁密码库，然后刷新网站登录页。
+
+扩展通过本机 `127.0.0.1:35320` 与桌面端通信。密码库锁定或桌面端退出时，扩展无法读取、填写或保存密码。更新扩展后需在扩展管理页重新加载，并刷新已打开的网站标签页。
+
+## 数据与安全
+
+- Windows 安装版的密码库默认位于 `%APPDATA%\localpass\vaults`。其中 `system.db` 保存账号目录，`user_*.db` 保存各账号的密码记录；迁移或备份时必须保留完整目录。
+- 数据库中的密码字段使用 AES-256-GCM 加密，密钥由主密码和该密码库随机生成的盐派生。忘记主密码无法解密密码记录。
+- 设置中的 `.localpass` 文件是加密导出，但当前格式依赖原密码库的加密密钥，不能单独导入到新建的独立密码库。跨电脑迁移请在完全退出 LocalPass 后复制整个 `vaults` 文件夹，并在新电脑上用原账号和主密码登录。
+- 下载站和 WSL 仅用于分发安装包、扩展与更新元数据，不存储或同步密码。
+- 登录助手的通信限于本机。密码检查也在本地完成，不会向第三方网站查询密码是否泄露。
+
+## 开发
+
+开发环境需要 Node.js 22 和 npm。
 
 ```bash
 npm install
 npm run dev
 ```
 
-Build the production renderer and main process:
+常用检查与构建：
 
 ```bash
+npm test
+npm run test:extension
+npm run test:projects
 npm run build
-```
-
-Build a Windows installer:
-
-```bash
 npm run build:win
+npm run package:distribution
 ```
 
-To share the desktop app with other people, run `npm run package:distribution` after building. Deploy the resulting download bundle to WSL with `deploy/wsl/deploy.sh`. See [WSL 发布说明](docs/WSL发布说明.md) for commands, installation steps and data locations. WSL serves downloads only; each person installs the desktop app and keeps a separate local vault.
+Windows 安装包生成在 `dist/release/`；下载页、安装包和扩展压缩包生成在 `dist/downloads/site/`。部署到 WSL 的步骤见[WSL 发布说明](docs/WSL发布说明.md)。
 
-The packaged application is independently deployable. It stores vault databases under Electron's user data directory in `vaults/`.
+## 项目结构
 
-## Chrome extension
+| 路径 | 内容 |
+| --- | --- |
+| `src/main/` | Electron 主进程、本地桥接、账号认证与 SQLite 密码库 |
+| `src/preload/` | 渲染进程可调用的隔离 IPC 接口 |
+| `src/renderer/` | Vue 桌面界面 |
+| `chrome-extension/` | Chrome Manifest V3 扩展 |
+| `native-messaging/` | 浏览器 Native Messaging 集成 |
+| `database/` | 数据库初始化与结构文件 |
+| `deploy/wsl/` | 下载页、Nginx 与 WSL 部署配置 |
 
-1. Start LocalPass and unlock the vault.
-2. Open `chrome://extensions`, enable Developer mode, and choose Load unpacked.
-3. Select the `chrome-extension/` directory.
-4. Open a login page. When saved credentials exist for the host and port, choose an account from the LocalPass picker to fill the form.
-5. After a successful login submission, the extension sends the captured username and password to the LocalPass localhost bridge.
+## 相关文档
 
-The bridge listens only on `127.0.0.1:35320`. It rejects capture and lookup requests while the vault is locked.
-
-From desktop version 1.2.1, launching again activates the existing window instead of starting another bridge. If a development build or another program occupies the bridge port, the desktop shows a Chinese notice and keeps the vault usable. Close the other LocalPass instance and restart to restore the extension connection. `npm run test:startup` checks duplicate launches and occupied ports with a disposable profile.
-
-From version 1.2.2, closing the window offers Cancel, Quit and Run in background. Background mode keeps the unlocked vault and extension connection running, with a system tray menu to reopen or quit. A locked or exited desktop cannot capture or fill passwords. “不再提示” remembers the chosen Quit/Background action for exactly 72 hours across restarts; Cancel is never remembered. Settings → 关闭窗口 → 恢复关闭提示 clears the choice early. The expiry is fixed when chosen and does not extend on subsequent closes.
-
-The account picker opens only when a login username or password field is focused or clicked. Selecting an account, leaving the field, pressing Escape, submitting the login, or navigating away closes it. Page mutations never reopen it, and stale lookup responses are ignored.
-
-After changing extension code, reload LocalPass in `chrome://extensions` and refresh the website tab. Restarting the desktop app alone does not update scripts already injected into a tab.
-
-The extension also recognizes SPA logins backed by another API origin or port: after an explicit login attempt, a same-site route change with the login fields gone and no visible login error confirms the capture. Credentials stay associated with the website's host and port, not the API server. Unrelated cross-origin POST requests alone never trigger saving.
-
-Traditional form logins such as Jenkins are supported across full-page POST/302 redirects. The extension waits for the destination document to report that the login fields and visible login errors are absent before saving; a destination that still shows a login form or error cancels the capture. Reload extension version 1.2.0 or newer and refresh the login page to use this behavior.
-
-Run the extension regression checks with `npm run test:extension`. They use the project's Electron in a hidden window with a temporary profile, a local fixture page, and simulated account responses; no real vault or browser profile is accessed.
-
-## Database
-
-The runtime initializes the schema from the logic in `src/main/db.js`. The equivalent safe initialization SQL is in `database/init.sql`. It creates the apps and credential version tables and does not contain any real credentials.
-
-Settings shows the signed-in account and the current SQLite file, with an action to reveal it in Explorer. Development builds store databases in `.localpass-data/databases/` inside the project, outside Vite's output folder and redirected AppData. This directory is excluded from Git; keep it when replacing a project checkout. On first use, existing accounts and available vaults are copied from the previous AppData directory using consistent SQLite snapshots; the originals are retained and missing vaults are never replaced with blank files. Packaged Windows builds continue to use `%APPDATA%/localpass/vaults/`. Keep `system.db` (the account catalog) together with the account's `user_*.db` file. Export an encrypted backup from Settings before moving data between environments. Login requires an existing, valid vault and never silently creates a replacement when its file is missing. Only registration creates new vaults.
-
-## Project layout
-
-- `src/main/`: Electron main process, encrypted database access, authentication, and localhost bridge.
-- `src/preload/`: context-isolated IPC API exposed to the renderer.
-- `src/renderer/`: Vue user interface for the vault.
-- `chrome-extension/`: Chrome Manifest V3 content script and background service worker.
-- `native-messaging/`: optional native messaging host integration.
-- `database/init.sql`: reproducible database schema.
-- `NOFX_QUEST.md`: NOFX Developer Quest project identifier.
-
-## Security notes
-
-- Never commit `.env`, API keys, passwords, or real vault database files.
-- `.env.example` contains only development variable names.
-- Clipboard contents are cleared after 30 seconds when they still contain a copied password.
-- Extension credentials are requested only from the local bridge after the vault has been unlocked.
+- [WSL 下载站部署与更新](docs/WSL发布说明.md)
+- [开发环境项目匹配](docs/开发环境项目匹配.md)
+- [界面设计说明](docs/UI设计说明.md)
