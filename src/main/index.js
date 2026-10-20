@@ -23,7 +23,7 @@ import {
   isVaultUnlocked
 } from './db'
 import { initBridgeServer, closeBridgeServer } from './bridge'
-import { initializeStorage } from './storage'
+import { initializeStorage, isolateBrowserSession } from './storage'
 import { createStorageSnapshot } from './storage-backup'
 import { acquireSingleInstance } from './single-instance'
 import { createCloseController, readClosePreference, clearClosePreference } from './close-behavior'
@@ -36,6 +36,7 @@ import { createUpdateManager } from './updates'
 app.commandLine.appendSwitch('in-process-gpu')
 app.commandLine.appendSwitch('disable-gpu')
 app.disableHardwareAcceleration()
+isolateBrowserSession()
 
 let mainWindow
 let clipboardClearTimer = null

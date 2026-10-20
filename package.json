@@ -1,6 +1,6 @@
 {
   "name": "localpass",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "LocalPass 本地加密密码管理器与浏览器登录助手",
   "main": "./out/main/index.js",
   "author": "samllest",

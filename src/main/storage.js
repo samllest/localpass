@@ -5,12 +5,20 @@ import Database from 'better-sqlite3'
 
 let configuredDbDir = null
 
+// Chromium owns sessionData/databases (WebSQL) and removes unregistered files.
+// Keep its session tree separate, including while migrating older vaults.
+export function isolateBrowserSession() {
+  const directory = join(app.getPath('userData'), 'browser-session')
+  mkdirSync(directory, { recursive: true })
+  app.setPath('sessionData', directory)
+}
+
 // Development builds share a project-owned directory outside Vite's output and
-// the launcher's redirected AppData. Packaged installs retain their usual path.
+// the launcher's redirected AppData. Packaged vaults avoid Chromium's database tree.
 export async function initializeStorage({ developmentRoot = app.getAppPath() } = {}) {
   const legacyDir = join(app.getPath('userData'), 'databases')
   const targetDir = app.isPackaged
-    ? legacyDir
+    ? join(app.getPath('userData'), 'vaults')
     : join(developmentRoot, '.localpass-data', 'databases')
 
   if (targetDir !== legacyDir && !existsSync(join(targetDir, 'system.db'))) {
@@ -18,7 +26,9 @@ export async function initializeStorage({ developmentRoot = app.getAppPath() } =
       throw new Error(`数据目录不完整，已停止初始化以保护现有文件：${targetDir}`)
     }
     if (existsSync(join(legacyDir, 'system.db'))) {
-      const parent = join(developmentRoot, '.localpass-data')
+      const parent = app.isPackaged
+        ? app.getPath('userData')
+        : join(developmentRoot, '.localpass-data')
       mkdirSync(parent, { recursive: true })
       const staging = mkdtempSync(join(parent, 'migration-'))
       // SQLite's backup API includes committed WAL pages. Never copy an open
@@ -69,7 +79,8 @@ export async function initializeStorage({ developmentRoot = app.getAppPath() } =
 }
 
 export function getDbDir() {
-  const dbDir = configuredDbDir || join(app.getPath('userData'), 'databases')
+  const dbDir =
+    configuredDbDir || join(app.getPath('userData'), app.isPackaged ? 'vaults' : 'databases')
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true })
   }

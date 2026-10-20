@@ -14,13 +14,18 @@ Var LocalPassWasRunning
 
 !macro customInstall
   ; CHECK_APP_RUNNING has finished: preserve the complete closed SQLite file set.
-  ${If} ${FileExists} "$APPDATA\${APP_PACKAGE_NAME}\databases\system.db"
+  ${If} ${FileExists} "$APPDATA\${APP_PACKAGE_NAME}\vaults\system.db"
+    StrCpy $R3 "$APPDATA\${APP_PACKAGE_NAME}\vaults"
+  ${Else}
+    StrCpy $R3 "$APPDATA\${APP_PACKAGE_NAME}\databases"
+  ${EndIf}
+  ${If} ${FileExists} "$R3\system.db"
     CreateDirectory "$APPDATA\${APP_PACKAGE_NAME}\recovery\installer-${VERSION}"
     GetTempFileName $R2 "$APPDATA\${APP_PACKAGE_NAME}\recovery\installer-${VERSION}"
     Delete "$R2"
     CreateDirectory "$R2"
     ClearErrors
-    CopyFiles /SILENT "$APPDATA\${APP_PACKAGE_NAME}\databases\*.*" "$R2"
+    CopyFiles /SILENT "$R3\*.*" "$R2"
     ${If} ${Errors}
       MessageBox MB_OK|MB_ICONSTOP "Unable to back up the local vault. Please keep the original data directory."
       Abort

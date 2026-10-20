@@ -35,7 +35,7 @@ npm run package:distribution
 
 当前更新包未公共签名，使用现有 HTTP 内网站点；文件哈希用于检查下载完整性，不能证明发布者身份。如需提高发布来源验证能力，应给安装包签名并将站点迁移到 HTTPS。
 
-### 1.4.1 更新与重装保护
+### 1.4.2 密码库隔离、更新与重装保护
 
 注册时只有账号对应的密码库初始化成功才提交账号，初始化失败会回滚账号记录，避免后续出现「账号已存在但密码库缺失」。正常退出时显式关闭账号目录数据库。原先已缺失的文件不会用空库替代，应恢复完整的 `system.db` 和对应的 `user_*.db`。
 
@@ -145,4 +145,4 @@ Remove-NetFirewallRule -Name LocalPass-LAN-Downloads-18770
 
 勾选「不再提示」后，记住本次「确认关闭」或「后台运行」选择 72 小时，重启后仍有效。重复关闭不会顺延到期时间，取消不会保存任何选择。可在设置的「关闭窗口」中点击「恢复关闭提示」提前恢复。托盘菜单中的「退出 LocalPass」始终直接退出。
 
-Windows 安装版的数据通常位于 `%APPDATA%\localpass\databases`。开发版使用项目的 `.localpass-data/databases`。更新或迁移前保留完整数据目录，并在设置中导出加密备份；当前备份解密需要原密码库的密钥，应一并保留原 `system.db` 与 `user_*.db` 文件。
+Windows 安装版的数据位于 `%APPDATA%\localpass\vaults`。从 1.4.2 起，旧版 `databases` 目录中的账号和现存密码库会通过 SQLite 一致性快照自动迁移，原文件保留。浏览器内核数据单独放在 `browser-session`，避免 Chromium 启动清理误删密码库。开发版使用项目的 `.localpass-data/databases`。更新或迁移前保留完整数据目录，并在设置中导出加密备份；当前备份解密需要原密码库的密钥，应一并保留原 `system.db` 与 `user_*.db` 文件。

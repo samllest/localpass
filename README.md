@@ -40,7 +40,7 @@ npm run build:win
 
 To share the desktop app with other people, run `npm run package:distribution` after building. Deploy the resulting download bundle to WSL with `deploy/wsl/deploy.sh`. See [WSL 发布说明](docs/WSL发布说明.md) for commands, installation steps and data locations. WSL serves downloads only; each person installs the desktop app and keeps a separate local vault.
 
-The packaged application is independently deployable. It stores vault databases under Electron's user data directory in `databases/`.
+The packaged application is independently deployable. It stores vault databases under Electron's user data directory in `vaults/`.
 
 ## Chrome extension
 
@@ -70,7 +70,7 @@ Run the extension regression checks with `npm run test:extension`. They use the 
 
 The runtime initializes the schema from the logic in `src/main/db.js`. The equivalent safe initialization SQL is in `database/init.sql`. It creates the apps and credential version tables and does not contain any real credentials.
 
-Settings shows the signed-in account and the current SQLite file, with an action to reveal it in Explorer. Development builds store databases in `.localpass-data/databases/` inside the project, outside Vite's output folder and redirected AppData. This directory is excluded from Git; keep it when replacing a project checkout. On first use, existing accounts and available vaults are copied from the previous AppData directory using consistent SQLite snapshots; the originals are retained and missing vaults are never replaced with blank files. Packaged Windows builds continue to use `%APPDATA%/localpass/databases/`. Keep `system.db` (the account catalog) together with the account's `user_*.db` file. Export an encrypted backup from Settings before moving data between environments. Login requires an existing, valid vault and never silently creates a replacement when its file is missing. Only registration creates new vaults.
+Settings shows the signed-in account and the current SQLite file, with an action to reveal it in Explorer. Development builds store databases in `.localpass-data/databases/` inside the project, outside Vite's output folder and redirected AppData. This directory is excluded from Git; keep it when replacing a project checkout. On first use, existing accounts and available vaults are copied from the previous AppData directory using consistent SQLite snapshots; the originals are retained and missing vaults are never replaced with blank files. Packaged Windows builds continue to use `%APPDATA%/localpass/vaults/`. Keep `system.db` (the account catalog) together with the account's `user_*.db` file. Export an encrypted backup from Settings before moving data between environments. Login requires an existing, valid vault and never silently creates a replacement when its file is missing. Only registration creates new vaults.
 
 ## Project layout
 
