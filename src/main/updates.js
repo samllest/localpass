@@ -52,9 +52,12 @@ export function createUpdateManager({
   }
   function fail(error) {
     const code = error?.code || ''
-    const message = /SHA|checksum/i.test(code + ' ' + error?.message)
-      ? '安装包校验失败，请重新下载或联系管理员重新发布。'
-      : '更新未完成，请确认已连接内网且更新服务可用，然后重试。'
+    const message =
+      code === 'ERR_VAULT_BACKUP'
+        ? error.message
+        : /SHA|checksum/i.test(code + ' ' + error?.message)
+          ? '安装包校验失败，请重新下载或联系管理员重新发布。'
+          : '更新未完成，请确认已连接内网且更新服务可用，然后重试。'
     change({ status: 'error', error: message })
   }
   updater.autoDownload = false

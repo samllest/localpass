@@ -131,3 +131,19 @@ test('development builds cannot check, download or install updates', async (t) =
   await manager.install()
   assert.deepEqual(calls, [])
 })
+
+test('a failed local vault backup pauses installation and reports the storage problem', async (t) => {
+  const { manager } = fixture(t, {
+    install: () => {
+      throw Object.assign(new Error('本地密码库备份失败，更新已暂停。'), {
+        code: 'ERR_VAULT_BACKUP'
+      })
+    }
+  })
+  await manager.check()
+  await manager.download()
+  const result = await manager.install()
+  assert.equal(result.status, 'error')
+  assert.match(result.error, /密码库备份失败/)
+  assert.doesNotMatch(result.error, /连接内网/)
+})

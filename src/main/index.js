@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'fs/promises'
 import { dialog } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
-import { initSystemDb, registerUser, loginUser } from './auth'
+import { initSystemDb, registerUser, loginUser, closeSystemDb } from './auth'
 import {
   initDB,
   getVaultInfo,
@@ -24,6 +24,7 @@ import {
 } from './db'
 import { initBridgeServer, closeBridgeServer } from './bridge'
 import { initializeStorage } from './storage'
+import { createStorageSnapshot } from './storage-backup'
 import { acquireSingleInstance } from './single-instance'
 import { createCloseController, readClosePreference, clearClosePreference } from './close-behavior'
 import { chooseProjectAccount, cancelProjectChoices } from './project-choice'
@@ -164,6 +165,7 @@ app
           noLink: true
         })
         if (result.response !== 1) return
+        await createStorageSnapshot()
         // before-quit allows the installer to exit without the normal close-to-tray prompt.
         autoUpdater.quitAndInstall(false, true)
       }
@@ -184,18 +186,16 @@ app
     })
 
     ipcMain.handle('auth:register', async (_event, username, password) => {
-      const res = registerUser(username, password)
-      if (res.success) {
+      const res = registerUser(username, password, (account) => {
         try {
-          initDB(res.dbFilename, { createIfMissing: true })
-          setMasterPassword(password, res.salt)
-          currentUsername = res.username
+          initDB(account.dbFilename, { createIfMissing: true })
+          setMasterPassword(password, account.salt)
         } catch (error) {
           closeVault()
-          currentUsername = null
-          return { success: false, error: error.message || '无法创建密码库，请检查存储目录' }
+          throw error
         }
-      }
+      })
+      if (res.success) currentUsername = res.username
       return res
     })
 
@@ -318,6 +318,7 @@ app.on('before-quit', () => {
   tray = null
   void closeBridgeServer()
   closeVault()
+  closeSystemDb()
   currentUsername = null
 })
 

@@ -18,6 +18,8 @@ win:
   executableName: localpass
   signAndEditExecutable: false
 nsis:
+  include: build/installer.nsh
+  runAfterFinish: true
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}

@@ -12,6 +12,8 @@ npm test
 npm run test:site-data
 npm run test:extension
 npm run test:startup
+npm run test:storage-lifecycle
+npm run test:installer
 npm run build:win
 npm run test:updates
 npm run package:distribution
@@ -32,6 +34,14 @@ npm run package:distribution
 以后发布时，提升 `package.json` 版本，执行 `npm run build:win`、`npm run package:distribution`，再执行下方 WSL 部署命令。打包会同时发布 electron-updater 使用的 `latest.yml`、安装包及 blockmap，SHA256SUMS 也包含这些文件。Nginx 禁止缓存更新索引，并保留历史安装包，已检查过旧版本的客户端仍可完成下载。下载时 electron-updater 按索引中的 SHA512 校验完整安装包。
 
 当前更新包未公共签名，使用现有 HTTP 内网站点；文件哈希用于检查下载完整性，不能证明发布者身份。如需提高发布来源验证能力，应给安装包签名并将站点迁移到 HTTPS。
+
+### 1.4.1 更新与重装保护
+
+注册时只有账号对应的密码库初始化成功才提交账号，初始化失败会回滚账号记录，避免后续出现「账号已存在但密码库缺失」。正常退出时显式关闭账号目录数据库。原先已缺失的文件不会用空库替代，应恢复完整的 `system.db` 和对应的 `user_*.db`。
+
+应用内更新在用户确认安装后，通过 SQLite backup API 将完整账号目录和全部密码库（含已提交的 WAL 内容）备份到 `%APPDATA%\localpass\recovery\updates\`；备份不完整时暂停更新。安装程序也会在关闭旧进程后保留完整的数据库文件集合（包括 WAL）到 `recovery\installer-<version>\`。这些备份保留原密码库密钥上下文，仍需原主密码解锁。
+
+正常交互安装结束后启动应用；静默覆盖安装检测到旧应用原本在运行（包括托盘后台）时，也自动启动一个替代实例。静默首次安装、或原本未运行的静默重装不会强制启动；应用内更新的 `--force-run` 交给标准安装流程处理，避免重复启动。`test:installer` 使用独立产品标识、临时目录和无窗口测试进程实际验证静默重装，不会覆盖 LocalPass 安装或访问真实密码库。
 
 ## 部署到 WSL
 
