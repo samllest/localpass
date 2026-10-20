@@ -49,7 +49,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-wsl-downlo
 
 守护程序由 Windows 任务计划程序启动，不依赖当前终端或项目目录。它在 Docker 就绪后启动 LocalPass 下载容器并保持 WSL 活跃；保活进程退出后 15 秒重试。任务在用户登录时启动，并每分钟尝试拉起一次；已有实例运行时忽略重复启动。关闭 PowerShell、CMD 或 WSL 终端不会主动退出守护任务。Windows 用户需要保持登录，主机保持开机且不休眠。
 
-守护代码内置在任务配置中，源脚本为 `scripts/keep-wsl-downloads-running.ps1`。日志由任务运行账户写到 `%LOCALAPPDATA%\LocalPass\WSL\keepalive.log`；可用以下命令查看任务状态：
+安装脚本使用 Windows 自带的 .NET Framework 编译器，将 `scripts/wsl-downloads-supervisor.cs` 编译为 Windows GUI 子系统的后台程序，安装到 `%LOCALAPPDATA%\LocalPass\WSL\`。任务直接启动这个程序；它和 WSL 子进程均不创建控制台，因此不会留下空白的 Windows Terminal 窗口。守护程序使用单实例锁防止重复保活，并在自身退出时清理其 WSL 子进程。无需重新安装 LocalPass 桌面端或浏览器扩展。
+
+日志由任务运行账户写到 `%LOCALAPPDATA%\LocalPass\WSL\keepalive.log`；可用以下命令查看任务状态：
 
 ```powershell
 Get-ScheduledTask -TaskName LocalPass-WSL-Downloads

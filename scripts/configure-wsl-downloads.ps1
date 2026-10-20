@@ -53,22 +53,25 @@ if ($DeployDirectory -and $DeployDirectory -notmatch '^/[\w./-]+$') {
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $runtimeDirectory = Join-Path $env:LOCALAPPDATA 'LocalPass\WSL'
 New-Item -ItemType Directory -Path $runtimeDirectory -Force | Out-Null
-$runnerPath = Join-Path $runtimeDirectory 'keep-wsl-downloads-running.ps1'
-$runnerSource = Join-Path $PSScriptRoot 'keep-wsl-downloads-running.ps1'
+$runnerSource = Join-Path $PSScriptRoot 'wsl-downloads-supervisor.cs'
 if (-not (Test-Path -LiteralPath $runnerSource)) { throw 'The WSL supervisor script is missing.' }
+$sourceHash = (Get-FileHash -LiteralPath $runnerSource -Algorithm SHA256).Hash.Substring(0, 12).ToLowerInvariant()
+$runnerPath = Join-Path $runtimeDirectory "wsl-downloads-supervisor-$sourceHash.exe"
+if (-not (Test-Path -LiteralPath $runnerPath)) {
+  $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+  if (-not (Test-Path -LiteralPath $compiler)) {
+    $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
+  }
+  & $compiler /nologo /target:winexe /optimize+ "/out:$runnerPath" $runnerSource
+  if ($LASTEXITCODE -ne 0) { throw 'Unable to compile the windowless WSL supervisor.' }
+}
 $existingTask = Get-ScheduledTask -TaskName 'LocalPass-WSL-Downloads' -ErrorAction SilentlyContinue
 if ($existingTask -and $existingTask.State -eq 'Running') {
   Stop-ScheduledTask -TaskName 'LocalPass-WSL-Downloads'
 }
-Copy-Item -LiteralPath $runnerSource -Destination $runnerPath -Force
-$runnerCode = Get-Content -LiteralPath $runnerSource -Raw
-# Store the supervisor in the task, so startup does not depend on a terminal,
-# the repository location, or the registering process's filesystem context.
-$invocation = "& {`n$runnerCode`n} -Distro '$Distro'"
-if ($DeployDirectory) { $invocation += " -DeployDirectory '$DeployDirectory'" }
-$encodedInvocation = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($invocation))
-$arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand $encodedInvocation"
-$action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $arguments
+$arguments = $Distro
+if ($DeployDirectory) { $arguments += " $DeployDirectory" }
+$action = New-ScheduledTaskAction -Execute $runnerPath -Argument $arguments
 $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
 $retryTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
