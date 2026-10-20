@@ -18,6 +18,7 @@ function background(options = {}) {
     Blob,
     Uint8Array,
     AbortSignal,
+    AbortController,
     btoa,
     console,
     setTimeout: (callback, delay) => {
@@ -65,6 +66,8 @@ function background(options = {}) {
     fetch: async (url, config) => {
       const address = String(url)
       messages.push({ url: address, config })
+      if (address.includes('127.0.0.1:35320') && options.lookupFetch && address.includes('/lookup'))
+        return options.lookupFetch(address, config)
       if (address.includes('127.0.0.1:35320'))
         return new Response(JSON.stringify({ ok: true, accounts: [] }))
       if (options.iconFetch) return options.iconFetch(address)
@@ -143,18 +146,31 @@ function background(options = {}) {
         statusCode: 200,
         url: payload.form_action
       }),
-    lookup: () =>
+    lookup: (message = {}, sender = {}) =>
       new Promise((resolve) =>
         onMessage(
           {
             type: 'LP_LOOKUP',
             identity: '10.0.15.33',
             site_name: payload.site_name,
-            project_name: 'Agent Router'
+            project_name: 'Agent Router',
+            ...message
           },
-          { url: payload.page_url },
+          {
+            url: payload.page_url,
+            tab: { id: 7 },
+            frameId: 0,
+            documentId: 'login-page',
+            ...sender
+          },
           resolve
         )
+      ),
+    cancelLookup: (requestId, sender = {}) =>
+      onMessage(
+        { type: 'LP_LOOKUP_CANCEL', requestId },
+        { url: payload.page_url, tab: { id: 7 }, frameId: 0, documentId: 'login-page', ...sender },
+        () => {}
       ),
     send: () => context.sendCapture(7, vm.runInContext('pendingCaptures[7]', context))
   }
@@ -165,6 +181,23 @@ test('background uses the sender URL port even with an old content script', asyn
   await fixture.lookup()
   assert.equal(new URL(fixture.messages[0].url).searchParams.get('identity'), '10.0.15.33:3000')
   assert.equal(new URL(fixture.messages[0].url).searchParams.get('project_name'), 'Agent Router')
+})
+
+test('cancelling a document lookup aborts its HTTP request without affecting another document', async () => {
+  const fixture = background({
+    lookupFetch: (_url, { signal }) =>
+      new Promise((_resolve, reject) =>
+        signal.addEventListener('abort', () => reject(new Error('cancelled')))
+      )
+  })
+  const first = fixture.lookup({ requestId: 'choice-1' })
+  const second = fixture.lookup({ requestId: 'choice-1' }, { documentId: 'other-page' })
+  fixture.cancelLookup('choice-1')
+  assert.equal(fixture.messages[0].config.signal.aborted, true)
+  assert.equal(fixture.messages[1].config.signal.aborted, false)
+  assert.equal((await first).ok, false)
+  fixture.cancelLookup('choice-1', { documentId: 'other-page' })
+  assert.equal((await second).ok, false)
 })
 
 test('Jenkins-style POST redirect saves only after the destination document confirms no login form or error', async () => {

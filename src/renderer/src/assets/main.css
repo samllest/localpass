@@ -1,27 +1,29 @@
+@import './fonts/fonts.css';
+@import './fonts/input-font.css';
 /* LocalPass: Chrome-inspired navigation, local-first password workflows.
    Shared tokens → shell and primitives → pages → dialogs → responsive. */
 :root {
   color-scheme: light;
   --bg-0: #f4f6fa;
   --bg-1: #ffffff;
-  --bg-2: #edf1f7;
-  --bg-3: #e2e7ef;
-  --accent: #0b57d0;
-  --accent-hover: #0842a0;
-  --accent-soft: #e7f0ff;
+  --bg-2: #f7f9fc;
+  --bg-3: #eef3ff;
+  --accent: #2f6bf6;
+  --accent-hover: #245be0;
+  --accent-soft: #eaf0ff;
   --on-accent: #ffffff;
-  --text-1: #20242c;
-  --text-2: #5e6776;
-  --text-3: #6d7786;
+  --text-1: #1b2433;
+  --text-2: #5c6b7d;
+  --text-3: #93a0b4;
   --border: #e7eaf0;
   --border-strong: #b9c2cf;
-  --danger: #b3261e;
+  --danger: #e5484d;
   --danger-soft: #fce8e6;
-  --success: #146c2e;
+  --success: #1fa971;
   --success-soft: #dff1e4;
   --warning: #995c00;
   --warning-soft: #fff0d4;
-  --overlay: rgb(20 25 35 / 40%);
+  --overlay: #aeb3ba;
   --shadow-sm: 0 2px 8px rgb(31 31 31 / 8%);
   --shadow-md: 0 12px 40px rgb(31 31 31 / 18%);
   --space-1: 4px;
@@ -37,6 +39,8 @@
   --font-small: 12px;
   --font-label: 13px;
   --font-body: 14px;
+  --font-input:
+    'LocalPass Ardot Input', 'Noto Sans SC', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
   --font-subtitle: 16px;
   --font-title: 22px;
   --font-page: 28px;
@@ -44,34 +48,39 @@
   --radius: 16px;
   --radius-l: 24px;
   --radius-pill: 999px;
-  --titlebar-h: 36px;
-  --sidebar-w: 204px;
-  --site-list-w: 404px;
-  --header-h: 104px;
-  --content-max: 856px;
+  --titlebar-h: 46px;
+  --sidebar-w: 232px;
+  --site-list-w: 388px;
+  --header-h: 60px;
+  --content-max: 700px;
   --control-h: 40px;
-  --icon-hit: 40px;
-  --avatar-size: 40px;
-  --row-h: 68px;
-  --radius-panel: 20px;
+  --icon-hit: 28px;
+  --avatar-size: 34px;
+  --row-h: 56px;
+  --radius-panel: 16px;
   --radius-card: 12px;
-  --font-site: 15px;
+  --font-site: 13px;
   --ease: 150ms ease-out;
+  --avatar-bg: #eef3ff;
+  --avatar-selected: #dce7ff;
+  --icon-color: #64748b;
+  --subtle: #f2f5fa;
+  --chrome: #ffffff;
 }
 html[data-theme='dark'] {
   color-scheme: dark;
-  --bg-0: #1b1c1f;
-  --bg-1: #242629;
-  --bg-2: #2b3039;
-  --bg-3: #393e47;
-  --accent: #a8c7fa;
-  --accent-hover: #c2d7fc;
-  --accent-soft: #253e64;
-  --on-accent: #062e6f;
-  --text-1: #e3e3e3;
-  --text-2: #c4c7c5;
-  --text-3: #a0a8b5;
-  --border: #3c4047;
+  --bg-0: #15181f;
+  --bg-1: #1e2230;
+  --bg-2: #2a2f40;
+  --bg-3: #262f4f;
+  --accent: #3b7bff;
+  --accent-hover: #6b9dff;
+  --accent-soft: #1b2a4e;
+  --on-accent: #ffffff;
+  --text-1: #e6e9f0;
+  --text-2: #9aa4b6;
+  --text-3: #6b7488;
+  --border: #303649;
   --border-strong: #687181;
   --danger: #f2b8b5;
   --danger-soft: #55302e;
@@ -82,6 +91,11 @@ html[data-theme='dark'] {
   --overlay: rgb(0 0 0 / 60%);
   --shadow-sm: 0 2px 8px rgb(0 0 0 / 14%);
   --shadow-md: 0 12px 40px rgb(0 0 0 / 32%);
+  --avatar-bg: #262f4f;
+  --avatar-selected: #1b2a4e;
+  --icon-color: #9aa4b6;
+  --subtle: #2a2f40;
+  --chrome: #232838;
 }
 *,
 *::before,
@@ -101,7 +115,8 @@ body {
   overflow: hidden;
   background: var(--bg-0);
   color: var(--text-1);
-  font-family: 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+  font-family:
+    'LocalPass Ardot', 'Noto Sans SC', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
   font-size: var(--font-body);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -112,6 +127,11 @@ select,
 textarea {
   font: inherit;
   color: inherit;
+}
+input,
+select,
+textarea {
+  font-family: var(--font-input);
 }
 button {
   cursor: pointer;
@@ -198,8 +218,8 @@ input[type='checkbox'] {
   height: var(--titlebar-h);
   flex-shrink: 0;
   align-items: center;
-  padding-left: var(--space-4);
-  background: var(--bg-0);
+  padding: 0 8px 0 16px;
+  background: var(--chrome);
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -209,8 +229,9 @@ input[type='checkbox'] {
   align-items: center;
 }
 .brand-name {
-  font-size: var(--font-small);
-  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
 }
 .titlebar-spacer {
   flex: 1;
@@ -220,11 +241,11 @@ input[type='checkbox'] {
   -webkit-app-region: no-drag;
 }
 .wc-btn {
-  width: 46px;
+  width: 40px;
   height: var(--titlebar-h);
   display: grid;
   place-items: center;
-  color: var(--text-2);
+  color: var(--icon-color);
 }
 .wc-btn:hover {
   background: var(--bg-3);
@@ -236,20 +257,21 @@ input[type='checkbox'] {
 
 /* Shared controls */
 .button {
-  min-height: var(--control-h);
+  min-height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-5);
+  gap: 6px;
+  padding: 0 20px;
   border: 1px solid transparent;
-  border-radius: var(--radius-s);
-  font-weight: 600;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
 }
 .button .ui-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 .button:active:not(:disabled) {
   transform: scale(0.98);
@@ -262,15 +284,16 @@ input[type='checkbox'] {
   background: var(--accent-hover);
 }
 .button-secondary {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--text-2);
+  background: var(--subtle);
 }
 .button-secondary:hover:not(:disabled) {
   background: var(--bg-3);
 }
 .button-outline {
-  border-color: var(--border-strong);
+  border-color: var(--accent);
   color: var(--accent);
+  background: var(--bg-1);
 }
 .button-outline:hover:not(:disabled),
 .button-subtle:hover:not(:disabled) {
@@ -296,18 +319,18 @@ input[type='checkbox'] {
   background: var(--bg-2);
 }
 .icon-button .ui-icon {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 .text-button {
-  min-height: var(--control-h);
+  min-height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
+  gap: 6px;
   color: var(--accent);
   font-weight: 500;
-  border-radius: var(--radius-s);
+  border-radius: 8px;
 }
 .text-button:hover:not(:disabled) {
   text-decoration: underline;
@@ -325,35 +348,35 @@ input[type='checkbox'] {
   grid-template-rows: var(--header-h) minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  padding: 0 var(--space-6) var(--space-6) var(--space-4);
+  padding: 0 24px 24px;
 }
 .manager-header {
   display: flex;
   align-items: center;
-  gap: var(--space-6);
+  gap: 16px;
   min-width: 0;
 }
 .manager-page-title {
-  min-width: 160px;
-  font-size: var(--font-title);
-  font-weight: 600;
-  letter-spacing: -0.6px;
+  flex-shrink: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 32px;
 }
 .manager-search {
   min-width: 0;
-  max-width: 560px;
-  height: 46px;
-  flex: 1;
+  max-width: 420px;
+  width: 420px;
+  height: 38px;
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 0 var(--space-4);
-  border-radius: var(--radius-pill);
-  background: var(--bg-2);
-  border: 2px solid transparent;
+  gap: 8px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--bg-1);
+  border: 0;
 }
 .manager-search:focus-within {
-  border-color: var(--accent);
+  outline: 2px solid var(--accent);
 }
 .manager-search input {
   flex: 1;
@@ -362,6 +385,7 @@ input[type='checkbox'] {
   border: 0;
   background: none;
   outline: 0;
+  font-size: 13px;
 }
 .manager-search input::placeholder {
   color: var(--text-3);
@@ -370,21 +394,21 @@ input[type='checkbox'] {
   display: none;
 }
 .manager-search > .ui-icon {
-  width: 20px;
-  height: 20px;
-  color: var(--text-2);
+  width: 16px;
+  height: 16px;
+  color: var(--text-3);
 }
 .manager-search kbd {
   white-space: nowrap;
   font-family: inherit;
   font-size: 11px;
   color: var(--text-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--space-1);
-  padding-inline: var(--space-1);
 }
 .header-add {
+  width: 106px;
   margin-left: auto;
+  height: 38px;
+  padding: 0 14px;
 }
 .mobile-lock {
   display: none;
@@ -393,14 +417,16 @@ input[type='checkbox'] {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: var(--space-6) var(--space-3) var(--space-5);
+  padding: 20px 12px 14px;
+  background: var(--chrome);
 }
 .manager-brand {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding-inline: var(--space-3);
+  gap: 12px;
+  padding: 0 12px;
   white-space: nowrap;
+  height: 49px;
 }
 .manager-brand-icon {
   width: 36px;
@@ -408,75 +434,78 @@ input[type='checkbox'] {
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  border-radius: var(--radius-card);
-  color: var(--on-accent);
-  background: var(--accent);
 }
 .manager-brand-icon .ui-icon {
-  width: 23px;
-  height: 23px;
+  width: 36px;
+  height: 36px;
 }
 .manager-brand strong {
   display: block;
   font-size: 19px;
-  font-weight: 650;
-  letter-spacing: -0.5px;
+  font-weight: 700;
+  line-height: 28px;
 }
 .manager-brand small {
   display: block;
   color: var(--text-3);
   font-size: 11px;
+  line-height: 16px;
+  margin-top: 1px;
 }
 .manager-sidebar nav {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-10);
+  gap: 4px;
+  margin-top: 20px;
 }
 .manager-nav {
-  min-height: 46px;
-  padding: 0 var(--space-5);
+  min-height: 40px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: 10px;
   text-align: left;
   color: var(--text-2);
-  border-radius: var(--radius-pill);
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
 }
 .manager-nav:hover {
   background: var(--bg-2);
 }
 .manager-nav.active {
-  color: var(--accent);
+  color: var(--text-1);
   background: var(--accent-soft);
-  font-weight: 600;
 }
 .manager-nav > .ui-icon {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
+  color: var(--icon-color);
 }
 .nav-count {
-  margin-left: auto;
-  font-size: var(--font-small);
+  font-size: 12px;
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 .sidebar-bottom {
   margin-top: auto;
-  padding: var(--space-4) var(--space-3) 0;
   color: var(--text-3);
 }
 .sidebar-privacy {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 12px;
+  height: 28px;
+  white-space: nowrap;
 }
 .sidebar-privacy .ui-icon {
-  width: 18px;
-  height: 18px;
-  color: var(--success);
+  width: 16px;
+  height: 16px;
+  color: var(--icon-color);
 }
 .sidebar-bottom strong {
-  font-size: var(--font-label);
+  font-size: 11px;
   font-weight: 400;
 }
 .sidebar-bottom p {
@@ -484,35 +513,39 @@ input[type='checkbox'] {
   font-size: var(--font-small);
 }
 .sidebar-lock {
-  margin-top: var(--space-5);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--border);
-  min-height: 48px;
+  margin-top: 0;
+  padding: 0 12px;
+  height: 33px;
   width: 100%;
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  align-items: flex-end;
+  gap: 8px;
   color: var(--text-2);
   text-align: left;
+  font-size: 13px;
+  font-weight: 500;
 }
 .sidebar-lock:hover {
   color: var(--accent);
 }
 .sidebar-lock .ui-icon {
-  width: 17px;
-  height: 17px;
+  margin-bottom: 1px;
+  width: 16px;
+  height: 16px;
 }
 .manager-content {
+  scrollbar-gutter: stable both-edges;
   overflow: auto;
   min-height: 0;
   min-width: 0;
-  padding: var(--space-6);
+  padding: 4px 0 0;
   scroll-behavior: auto;
 }
 .manager-content.vault-content {
+  scrollbar-gutter: auto;
   display: flex;
   flex-direction: column;
-  padding: 0;
+  padding: 4px 0 0;
   overflow: hidden;
 }
 .page-container {
@@ -523,52 +556,56 @@ input[type='checkbox'] {
   flex: 1;
   display: grid;
   grid-template-columns: var(--site-list-w) minmax(0, 1fr);
+  gap: 16px;
   min-height: 0;
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  overflow: hidden;
 }
 .password-list-panel {
-  border-right: 1px solid var(--border);
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--bg-1);
+  border-radius: 16px;
+  overflow: hidden;
 }
 .list-panel-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
-  padding: var(--space-6) var(--space-6) var(--space-3);
+  gap: 8px;
+  padding: 10px 20px;
+  min-height: 62px;
 }
 .list-panel-heading h2 {
-  font-size: var(--font-subtitle);
+  font-size: 15px;
   font-weight: 600;
+  line-height: 22px;
 }
 .list-panel-heading h2 span {
-  margin-left: var(--space-2);
+  display: block;
+  margin-top: 2px;
   color: var(--text-3);
-  font-size: var(--font-small);
+  font-size: 11px;
+  line-height: 16px;
   font-weight: 400;
 }
 .batch-toggle {
-  font-size: var(--font-label);
+  font-size: 12px;
 }
 .site-list-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-2);
+  padding: 4px 8px;
 }
 .list-panel-footer {
-  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-4) var(--space-6);
-  font-size: var(--font-small);
+  gap: 8px;
+  padding: 0 20px;
+  height: 46px;
+  flex-shrink: 0;
+  font-size: 11px;
   color: var(--text-3);
 }
 .status-dot {
@@ -583,9 +620,11 @@ input[type='checkbox'] {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-8);
+  gap: 12px;
+  padding: 32px;
   text-align: center;
+  background: var(--bg-1);
+  border-radius: 16px;
 }
 .detail-placeholder h2 {
   font-size: var(--font-title);
@@ -598,19 +637,20 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-6);
-  margin-bottom: var(--space-8);
+  gap: 24px;
+  margin-bottom: 24px;
 }
 .page-heading h1 {
-  font-size: var(--font-page);
-  font-weight: 500;
-  line-height: 1.3;
-  letter-spacing: -0.5px;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 41px;
   overflow-wrap: anywhere;
 }
 .page-heading p {
-  margin-top: var(--space-3);
-  color: var(--text-2);
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 19px;
 }
 .page-heading > .button {
   flex-shrink: 0;
@@ -619,20 +659,23 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
-  padding: 0 var(--space-6) var(--space-5);
-  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  padding: 8px 20px;
+  height: 44px;
+  flex-shrink: 0;
 }
 .filter-chips {
   display: flex;
-  gap: var(--space-1);
+  gap: 6px;
 }
 .filter-chip {
-  min-height: var(--control-h);
-  padding: 0 var(--space-3);
+  height: 28px;
+  min-width: 48px;
+  padding: 0 12px;
   color: var(--text-2);
-  border-radius: var(--radius-s);
-  font-size: var(--font-label);
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 500;
 }
 .filter-chip:hover {
   background: var(--bg-2);
@@ -640,15 +683,17 @@ input[type='checkbox'] {
 .filter-chip.active {
   background: var(--accent-soft);
   color: var(--accent);
-  font-weight: 600;
 }
 .sort-control select {
-  max-width: 112px;
-  min-height: var(--control-h);
+  max-width: 100px;
+  height: 28px;
   background: transparent;
   border: 0;
   color: var(--text-3);
-  font-size: var(--font-small);
+  font-size: 11px;
+  appearance: none;
+  text-align: right;
+  cursor: pointer;
 }
 .search-summary {
   padding: var(--space-3) var(--space-6) 0;
@@ -661,8 +706,9 @@ input[type='checkbox'] {
 .password-list-row {
   display: flex;
   align-items: center;
-  padding-inline: var(--space-4);
-  border-radius: var(--radius-card);
+  padding-inline: 10px;
+  border-radius: 10px;
+  margin-bottom: 2px;
 }
 .password-list-row:hover,
 .password-row:hover {
@@ -675,9 +721,8 @@ input[type='checkbox'] {
   background: transparent;
 }
 .password-list-row.selected .site-description strong,
-.password-list-row.selected .row-chevron,
-.password-list-row.selected .site-address b {
-  color: var(--accent);
+.password-list-row.selected .row-chevron {
+  color: var(--text-1);
 }
 .password-list-row > input {
   flex-shrink: 0;
@@ -687,12 +732,12 @@ input[type='checkbox'] {
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: var(--row-h);
+  min-height: 56px;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) 0;
+  gap: 12px;
+  padding: 6px 0;
   text-align: left;
-  border-radius: var(--radius-card);
+  border-radius: 10px;
 }
 .password-list > .password-row {
   padding-inline: var(--space-5);
@@ -706,15 +751,15 @@ input[type='checkbox'] {
   flex-shrink: 0;
   display: inline-grid;
   place-items: center;
-  border-radius: var(--radius-card);
-  background: var(--bg-2);
+  border-radius: 9px;
+  background: var(--avatar-bg);
   color: var(--accent);
-  font-size: var(--font-subtitle);
+  font-size: 16px;
   font-weight: 600;
 }
 .app-avatar {
-  color: var(--text-2);
-  background: var(--bg-3);
+  color: var(--accent);
+  background: var(--avatar-bg);
 }
 .site-avatar img {
   width: 24px;
@@ -730,39 +775,33 @@ input[type='checkbox'] {
   flex-direction: column;
   min-width: 0;
   flex: 1;
-  gap: var(--space-1);
+  gap: 1px;
 }
 .site-description strong {
-  font-size: var(--font-site);
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 19px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .site-description small {
-  font-size: var(--font-label);
+  font-size: 11px;
+  line-height: 16px;
   color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .site-account {
-  flex-shrink: 0;
-  font-size: var(--font-small);
-  color: var(--text-3);
-  max-width: 36%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: none;
 }
 .row-chevron {
-  color: var(--text-3);
-  width: 16px;
-  height: 16px;
+  display: none;
 }
 .site-address b {
-  font-weight: 600;
-  color: var(--text-2);
+  font-weight: 400;
+  color: inherit;
 }
 .selection-bar {
   display: flex;
@@ -838,12 +877,13 @@ input[type='checkbox'] {
 
 /* Shared detail fields keep credentials, actions and website identity aligned. */
 .password-details {
-  padding: var(--space-8);
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
+  background: var(--bg-1);
+  border-radius: 16px;
+  overflow: hidden;
 }
 .password-details > * {
   flex-shrink: 0;
@@ -852,10 +892,12 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: 12px;
   color: var(--text-3);
-  font-size: var(--font-label);
-  margin-bottom: var(--space-6);
+  font-size: 12px;
+  font-weight: 500;
+  height: 56px;
+  padding: 0 20px 0 24px;
 }
 .back-button {
   display: none;
@@ -878,7 +920,6 @@ input[type='checkbox'] {
 .detail-top-actions {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
   margin-left: auto;
 }
 .detail-menu {
@@ -923,36 +964,40 @@ input[type='checkbox'] {
 .detail-title {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: 16px;
   min-width: 0;
-  margin-bottom: var(--space-5);
+  min-height: 58px;
 }
 .detail-title > div {
   min-width: 0;
 }
 .detail-title h1 {
-  font-size: var(--font-page);
-  font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: -0.6px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 35px;
   overflow-wrap: anywhere;
 }
 .detail-title p {
   color: var(--text-2);
-  font-size: var(--font-label);
-  margin-top: var(--space-2);
+  font-size: 13px;
+  line-height: 19px;
+  margin-top: 4px;
   overflow-wrap: anywhere;
 }
 .site-avatar.large {
   width: 56px;
   height: 56px;
-  font-size: var(--font-title);
-  border-radius: var(--radius);
+  font-size: 24px;
+  font-weight: 700;
+  border-radius: 14px;
+  background: var(--avatar-selected);
 }
 .site-tab-metadata {
-  padding-bottom: var(--space-6);
-  border-bottom: 1px solid var(--border);
-  font-size: var(--font-label);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-size: 12px;
+  line-height: 17px;
 }
 .site-tab-metadata > div {
   display: flex;
@@ -978,16 +1023,17 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
-  margin: var(--space-6) 0 var(--space-3);
+  gap: 12px;
+  min-height: 19px;
 }
 .detail-section-heading h2 {
-  font-size: var(--font-body);
+  font-size: 13px;
   font-weight: 600;
+  line-height: 19px;
 }
 .detail-section-heading > span {
   color: var(--text-3);
-  font-size: var(--font-small);
+  font-size: 11px;
 }
 .account-section + .account-section {
   margin-top: var(--space-4);
@@ -1009,19 +1055,20 @@ input[type='checkbox'] {
   font-size: var(--font-label);
 }
 .credential-card {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
+  background: var(--bg-2);
+  border-radius: 12px;
   overflow: hidden;
 }
 .credential-field {
+  height: 58px;
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  min-height: 88px;
-  padding: var(--space-4) var(--space-5);
+  gap: 4px;
+  min-height: 58px;
+  padding: 9px 12px 9px 16px;
 }
 .credential-field + .credential-field {
+  height: 59px;
   border-top: 1px solid var(--border);
 }
 .credential-field > div {
@@ -1031,30 +1078,34 @@ input[type='checkbox'] {
 .credential-field label {
   display: block;
   color: var(--text-3);
-  font-size: var(--font-label);
-  margin-bottom: var(--space-1);
+  font-size: 11px;
+  line-height: 16px;
+  margin-bottom: 3px;
 }
 .credential-field p {
-  font-size: var(--font-subtitle);
+  font-size: 14px;
   font-weight: 500;
+  line-height: 20px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .site-information {
-  padding: var(--space-5);
-  border-radius: var(--radius-card);
-  background: var(--bg-0);
-  font-size: var(--font-label);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-2);
+  font-size: 12px;
 }
 .site-information > div {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr);
   align-items: center;
-  column-gap: var(--space-3);
-  min-height: 32px;
+  column-gap: 8px;
+  min-height: 46px;
+  padding: 10px 16px;
 }
 .site-information > div + div {
-  margin-top: var(--space-3);
+  min-height: 47px;
+  border-top: 1px solid var(--border);
 }
 .site-information dt {
   color: var(--text-3);
@@ -1069,11 +1120,9 @@ input[type='checkbox'] {
 .site-information a {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  min-height: var(--control-h);
-  font:
-    var(--font-body)/1.5 Consolas,
-    monospace;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
 }
 .site-information a > span {
   overflow-wrap: anywhere;
@@ -1081,8 +1130,8 @@ input[type='checkbox'] {
 }
 .site-information a .ui-icon {
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+  width: 14px;
+  height: 14px;
 }
 .site-information .site-address b {
   color: var(--accent);
@@ -1093,11 +1142,12 @@ input[type='checkbox'] {
 .address-tag {
   flex-shrink: 0;
   margin-left: auto;
-  padding: 2px var(--space-2);
-  border-radius: var(--space-1);
+  padding: 3px 8px;
+  border-radius: 6px;
   background: var(--bg-3);
   color: var(--text-2);
   font-size: 11px;
+  line-height: 16px;
 }
 .password-details > .page-footnote {
   margin-top: auto;
@@ -1117,18 +1167,20 @@ input[type='checkbox'] {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-5);
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
   color: var(--text-3);
-  font-size: var(--font-small);
+  font-size: 11px;
 }
 .history-toggle {
   margin-left: auto;
-  font-size: var(--font-label);
+  min-height: 17px;
+  font-size: 12px;
+  line-height: 17px;
 }
 .history-toggle .ui-icon {
-  width: 18px;
-  height: 18px;
+  display: none;
 }
 .credential-history {
   background: var(--bg-2);
@@ -1267,9 +1319,10 @@ input[type='checkbox'] {
 }
 .risk-results h2,
 .section-title {
-  font-size: var(--font-subtitle);
-  font-weight: 500;
-  margin-bottom: var(--space-4);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  margin-bottom: 24px;
 }
 .privacy-note {
   display: flex;
@@ -1286,15 +1339,17 @@ input[type='checkbox'] {
 
 /* Settings */
 .settings-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 16px;
   background: var(--bg-1);
-  margin-bottom: var(--space-8);
+  margin-bottom: 24px;
+  overflow: hidden;
 }
 .vault-location {
   min-width: 0;
 }
 .vault-file-path {
+  font-size: 11px !important;
+  line-height: 16px !important;
   overflow-wrap: anywhere;
   user-select: text;
 }
@@ -1302,38 +1357,54 @@ input[type='checkbox'] {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: var(--space-6);
-  padding: var(--space-6);
+  gap: 24px;
+  padding: 16px 20px;
+  min-height: 72px;
 }
 .preference-row + .preference-row {
   border-top: 1px solid var(--border);
 }
 .preference-row strong {
+  display: block;
+  font-size: 14px;
+  line-height: 20px;
   font-weight: 500;
 }
 .preference-row p {
-  font-size: var(--font-label);
+  font-size: 12px;
+  line-height: 17px;
   color: var(--text-3);
-  margin-top: var(--space-2);
+  margin-top: 3px;
 }
 .preference-row > button,
 .preference-row > select {
   flex-shrink: 0;
 }
 .preference-row select {
-  background: var(--bg-1);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-s);
-  min-height: var(--control-h);
-  padding: var(--space-2) var(--space-3);
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-3) 50%),
+    linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 14px,
+    calc(100% - 11px) 14px;
+  background-size: 3px 3px;
+  background-repeat: no-repeat;
+  background-color: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  height: 34px;
+  width: 96px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 .status-label {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
   white-space: nowrap;
   color: var(--success);
-  font-size: var(--font-label);
+  font-size: 12px;
 }
 .status-label > span {
   width: 7px;
@@ -1343,17 +1414,17 @@ input[type='checkbox'] {
 }
 .extension-card {
   display: flex;
-  gap: var(--space-5);
-  padding: var(--space-6);
+  gap: 12px;
+  padding: 20px 20px 16px;
 }
 .extension-icon {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
-  background: var(--bg-2);
+  background: var(--bg-3);
   color: var(--accent);
-  border-radius: var(--radius-s);
+  border-radius: 10px;
   flex-shrink: 0;
 }
 .extension-icon > .ui-icon {
@@ -1363,39 +1434,42 @@ input[type='checkbox'] {
 .extension-card h3 {
   font-size: var(--font-body);
   font-weight: 500;
+  line-height: 20px;
 }
 .extension-card p,
 .extension-card ol {
-  font-size: var(--font-label);
-  color: var(--text-3);
-  margin-top: var(--space-2);
-  line-height: 1.9;
+  font-size:12px;
+  line-height:17px;
+  color:var(--text-3);
+  margin-top:8px;
 }
 .extension-card details {
-  margin-top: var(--space-3);
+  margin-top: 8px;
 }
 .extension-card summary {
   cursor: pointer;
   color: var(--accent);
-  font-size: var(--font-label);
-  padding-block: var(--space-2);
+  font-size: 12px;
+  line-height: 17px;
+  padding-block: 0;
 }
 .extension-card ol {
-  padding-left: var(--space-5);
+  padding-left:0;
+  list-style-position:inside;
 }
 
 /* Native modal dialogs provide focus trapping, Escape and focus restoration. */
 .vault-dialog {
-  width: 480px;
+  width: 560px;
   max-width: calc(100vw - 32px);
   max-height: calc(100dvh - 64px);
   margin: auto;
-  padding: 0;
+  padding: 28px;
   color: var(--text-1);
   background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  box-shadow: var(--shadow-md);
+  border: 0;
+  border-radius: 16px;
+  box-shadow: none;
   overflow: auto;
 }
 .vault-dialog::backdrop {
@@ -1405,51 +1479,60 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-6) var(--space-6) var(--space-4);
-  gap: var(--space-4);
+  gap: 16px;
+  margin-bottom: 14px;
+  height: 29px;
 }
 .dialog-heading h2 {
-  font-size: var(--font-title);
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 29px;
 }
 .dialog-body {
-  padding: 0 var(--space-6);
+  padding: 18px 0 0;
   color: var(--text-2);
-  line-height: 1.8;
+  line-height: 19px;
+  font-size: 13px;
 }
 .delete-preview {
-  margin-top: var(--space-4);
-  padding: var(--space-3);
-  border-radius: var(--radius-s);
+  margin-top: 14px;
+  padding: 13px 14px;
+  border-radius: 8px;
   background: var(--bg-2);
-  font-size: var(--font-label);
+  font-size: 13px;
   overflow-wrap: anywhere;
 }
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
-  gap: var(--space-2);
-  padding: var(--space-6);
+  gap: 8px;
+  padding: 24px 0 0;
 }
 .account-form {
-  padding: 0 var(--space-6);
+  display: flex;
+  flex-direction: column;
+  min-height: 521px;
 }
 .account-form .dialog-actions {
-  padding-inline: 0;
+  margin-top: auto;
+  padding: 20px 0 0;
 }
 .form-intro {
-  margin-bottom: var(--space-5);
-  font-size: var(--font-label);
+  margin-bottom: 0;
+  font-size: 13px;
+  line-height: 19px;
   color: var(--text-3);
 }
 .form-row {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-4);
+  gap: 6px;
+  margin-top: 14px;
 }
 .form-row > label {
-  font-size: var(--font-label);
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 17px;
   color: var(--text-2);
 }
 .required {
@@ -1457,21 +1540,24 @@ input[type='checkbox'] {
 }
 .form-row input,
 .form-row select {
-  border: 1px solid var(--border);
+  border: 0;
   width: 100%;
-  min-height: 46px;
-  padding: var(--space-3);
-  background: var(--bg-0);
-  border-radius: var(--radius-s);
+  min-height: 40px;
+  height: 40px;
+  padding: 0 12px;
+  font-size: 13px;
+  background: var(--bg-2);
+  border-radius: 8px;
 }
 .form-row input::placeholder {
+  font-weight: 400;
   color: var(--text-3);
   font-size: var(--font-label);
 }
 .form-pair {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px;
-  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr) 148px;
+  gap: 12px;
 }
 .form-pair.app-identity {
   grid-template-columns: minmax(0, 1fr);
@@ -1482,34 +1568,45 @@ input[type='checkbox'] {
 .form-site-summary {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  background: var(--bg-0);
-  border-radius: var(--radius-card);
-  margin-bottom: var(--space-2);
+  gap: 12px;
+  padding: 14px;
+  background: var(--bg-2);
+  border-radius: 12px;
+  margin: 12px 0 0;
+  min-height: 67px;
+}
+.form-site-summary .site-avatar {
+  width: 38px;
+  height: 38px;
+  font-size: 15px;
+  font-weight: 700;
 }
 .form-site-summary > div {
   min-width: 0;
 }
 .form-site-summary strong {
   display: block;
-  font-weight: 600;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 .form-site-summary small {
   display: block;
-  font-size: var(--font-small);
+  font-size: 12px;
+  line-height: 17px;
   color: var(--text-3);
   overflow-wrap: anywhere;
-  margin-top: var(--space-1);
+  margin-top: 2px;
 }
 .password-input {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
 }
 .password-input input {
   flex: 1;
+  padding-right: 60px;
 }
 .password-strength {
   display: flex;
@@ -1538,14 +1635,17 @@ input[type='checkbox'] {
 }
 .generate-button {
   align-self: flex-start;
-  font-size: var(--font-label);
+  font-size: 13px;
+  min-height: 28px;
+  margin-top: 6px;
 }
 .generate-button .ui-icon {
   width: 18px;
   height: 18px;
 }
 .field-hint {
-  font-size: var(--font-small);
+  font-size: 12px;
+  line-height: 17px;
   color: var(--text-3);
 }
 .form-err,
@@ -1605,47 +1705,59 @@ input[type='checkbox'] {
   padding: var(--space-6);
 }
 .unlock-card {
-  width: 420px;
+  width: 400px;
   max-width: 100%;
-  padding: var(--space-10);
+  padding: 44px 48px 40px;
   text-align: center;
   background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
+  border-radius: 16px;
 }
 .unlock-logo {
-  display: flex;
-  justify-content: center;
-  margin-bottom: var(--space-5);
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 16px;
+  border-radius: 15px;
+  background: var(--accent);
+  color: white;
+}
+.unlock-logo-icon {
+  width: 28px;
+  height: 28px;
 }
 .unlock-title {
-  font-size: var(--font-page);
-  font-weight: 500;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 32px;
 }
 .unlock-sub {
-  font-size: var(--font-label);
+  font-size: 13px;
+  line-height: 19px;
   color: var(--text-3);
-  margin: var(--space-3) 0 var(--space-8);
+  margin: 6px 0 16px;
+  white-space: nowrap;
 }
 .unlock-form {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
   text-align: left;
 }
 .input-group {
   display: flex;
   align-items: center;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-s);
-  gap: var(--space-2);
+  height: 46px;
+  padding: 0 14px;
+  background: var(--bg-2);
+  border-radius: 10px;
+  gap: 8px;
 }
 .input-group:focus-within {
-  outline: 2px solid var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 .input-group.error {
-  border-color: var(--danger);
+  box-shadow: inset 0 0 0 2px var(--danger);
 }
 .input-group input {
   background: none;
@@ -1653,29 +1765,289 @@ input[type='checkbox'] {
   outline: none;
   min-width: 0;
   flex: 1;
-  padding: var(--space-4) 0;
+  padding: 0;
+  height: 46px;
+  font-size: 13px;
+  line-height: 20px;
+}
+/* Native password dots need normal system glyph advances. The design's
+   exported subset gives its bullet a full em, spacing typed masks too far apart. */
+.input-group input[type='password']:not(:placeholder-shown) {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  letter-spacing: normal;
 }
 .input-icon {
   color: var(--text-3);
+  order: -1;
+  width: 16px;
+  height: 16px;
 }
 .btn-unlock {
-  padding: var(--space-3);
-  border-radius: var(--radius-pill);
+  padding: 0 12px;
+  height: 46px;
+  border-radius: 10px;
   color: var(--on-accent);
   background: var(--accent);
-  margin-top: var(--space-2);
+  font-size: 13px;
+  font-weight: 500;
 }
 .btn-unlock:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 .unlock-hint {
-  display: inline-block;
-  margin-top: var(--space-6);
+  min-height: 17px;
+  display: block;
+  width: 100%;
+  margin-top: 16px;
   color: var(--accent);
-  font-size: var(--font-label);
+  font-size: 12px;
+  line-height: 17px;
 }
 
+/* Source: Ardot 03/22/12/01, shared dimensions rather than per-page patches. */
+.titlebar-brand > .ui-icon {
+  width: 24px;
+  height: 24px;
+}
+.password-list-row.selected .site-avatar {
+  background: var(--avatar-selected);
+}
+.detail-top-actions > .button {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+.detail-top-actions > .button .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+.detail-menu > summary {
+  width: 32px;
+  height: 32px;
+  background: var(--subtle);
+}
+.detail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 28px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.detail-scroll > * {
+  flex-shrink: 0;
+}
+.detail-scroll > .page-footnote {
+  margin: 0;
+  padding: 0;
+  justify-content: flex-start;
+  font-size: 11px;
+  line-height: 16px;
+}
+.site-information > div:first-child dd {
+  justify-content: flex-end;
+  color: var(--text-2);
+}
+.secret-text.concealed {
+  font-family: inherit;
+  letter-spacing: 0;
+}
+.account-section > .credential-actions {
+  margin-top: 12px;
+}
+.multi-account-heading {
+  margin-bottom: 8px;
+}
+.page-container {
+  padding-top: 4px;
+}
+.preference-row .button,
+.extension-card .button {
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 12px;
+  display: flex;
+  width: max-content;
+}
+.preference-row p + p {
+  font-size: 11px;
+  line-height: 16px;
+}
+.page-container > .page-footnote {
+  justify-content: flex-start;
+  margin-top: 0;
+  font-size: 12px;
+}
+.page-container > .page-footnote .ui-icon {
+  display: none;
+}
+.extension-card > div {
+  flex: 1;
+  min-width: 0;
+}
+.extension-card .button {
+  margin-top: 8px;
+}
+.extension-card ol {
+  padding-block: 0;
+  margin-top: 8px;
+  line-height: 17px;
+}
+.dialog-heading .icon-button {
+  width: 20px;
+  height: 20px;
+}
+.account-dialog {
+  min-height: 620px;
+}
+.account-dialog.project-dialog {
+  min-height: 737px;
+}
+.account-dialog.edit-dialog {
+  min-height: 730px;
+}
+.account-dialog.existing-dialog {
+  min-height: 703px;
+}
+.project-dialog .account-form {
+  min-height: 638px;
+}
+.edit-dialog .account-form {
+  min-height: 633px;
+}
+.existing-dialog .account-form {
+  min-height: 606px;
+}
+.edit-dialog .dialog-heading,
+.existing-dialog .dialog-heading {
+  margin-bottom: 12px;
+}
+.edit-dialog .form-row,
+.existing-dialog .form-row {
+  margin-top: 12px;
+}
+.form-pair:first-of-type .form-row {
+  margin-top: 14px;
+}
+.password-input > .icon-button {
+  position: absolute;
+  right: 10px;
+  width: 32px;
+  height: 28px;
+  font-size: 12px;
+  color: var(--accent);
+}
+.unlock-eye {
+  width: 16px;
+  height: 20px;
+  color: var(--icon-color);
+}
+.unlock-eye .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.checkup-container {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+  display: flex;
+}
+.checkup-workbench .checkup-row {
+  border: 0;
+  margin: 0;
+  padding: 6px 0;
+  gap: 12px;
+}
+.checkup-row .site-avatar .ui-icon {
+  width: 18px;
+  height: 18px;
+}
+.checkup-sort {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.checkup-findings .credential-field {
+  width: 100%;
+  text-align: left;
+  justify-content: space-between;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.checkup-findings .credential-field strong {
+  font-weight: 500;
+}
+.checkup-findings .credential-field small {
+  display: block;
+  color: var(--text-3);
+  margin-top: 3px;
+  font-size: 11px;
+}
+.checkup-view {
+  color: var(--accent);
+}
+.checkup-empty {
+  padding: 20px 16px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.detail-title > .site-avatar .ui-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.settings-header .manager-search {
+  margin-left: auto;
+}
+.settings-header .manager-search > .ui-icon {
+  display: none;
+}
+.settings-header .header-add {
+  margin-left: 0;
+  width: 100px;
+}
+.settings-header .header-add > .ui-icon { display:none; }
+.detail-top-actions > .button {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.credential-field .icon-button {
+  width: 24px;
+}
+.credential-field .icon-button .ui-icon {
+  color: var(--text-3);
+}
+.form-intro {
+  color: var(--text-2);
+}
+.dialog-actions .button {
+  border: 0;
+}
+.dialog-actions .button-subtle {
+  padding-inline: 8px;
+}
+.form-row select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-3) 50%),
+    linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 18px,
+    calc(100% - 11px) 18px;
+  background-size: 3px 3px;
+  background-repeat: no-repeat;
+}
+.checkup-container {
+  padding-top: 0;
+}
+.extension-card li + li {
+  margin-top: 6px;
+}
 @media (max-width: 1280px) {
+  .sidebar-privacy { white-space:normal; height:auto; min-height:44px; }
   :root {
     --sidebar-w: 180px;
     --site-list-w: 348px;
@@ -1693,8 +2065,8 @@ input[type='checkbox'] {
     min-width: auto;
     font-size: 20px;
   }
-  .password-details {
-    padding: var(--space-6);
+  .detail-scroll {
+    padding: 16px 20px;
   }
   .list-panel-heading,
   .list-toolbar {
@@ -1702,6 +2074,10 @@ input[type='checkbox'] {
   }
 }
 @media (max-width: 1100px) {
+  .checkup-workbench:not(.has-selection) .password-details {
+    display: none;
+  }
+
   .password-workbench {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1712,8 +2088,8 @@ input[type='checkbox'] {
   .detail-placeholder {
     display: none;
   }
-  .password-details {
-    padding: var(--space-8);
+  .detail-scroll {
+    padding: 16px 20px;
   }
   .back-button {
     display: inline-flex;
@@ -1757,6 +2133,7 @@ input[type='checkbox'] {
     display: none;
   }
   .header-add {
+    width: 106px;
     padding-inline: var(--space-3);
   }
   .manager-header {
@@ -1764,6 +2141,8 @@ input[type='checkbox'] {
   }
 }
 @media (max-width: 620px) {
+  .settings-header .header-add { width:40px; }
+  .settings-header .header-add > .ui-icon { display:block; }
   :root {
     --header-h: 72px;
     --font-page: 24px;
@@ -1809,6 +2188,7 @@ input[type='checkbox'] {
     height: 18px;
   }
   .header-add {
+    width: 106px;
     width: 40px;
     padding: 0;
     flex-shrink: 0;
@@ -1817,10 +2197,11 @@ input[type='checkbox'] {
     display: none;
   }
   .manager-content {
+    scrollbar-gutter: stable both-edges;
     padding: var(--space-3);
   }
-  .password-details {
-    padding: var(--space-5);
+  .detail-scroll {
+    padding: 16px 20px;
   }
   .detail-title h1 {
     font-size: var(--font-title);

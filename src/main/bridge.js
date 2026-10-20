@@ -25,6 +25,7 @@ function normalizeField(value) {
 }
 
 function sendJson(res, status, payload) {
+  if (res.destroyed || res.writableEnded) return
   res.writeHead(status, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify(payload))
 }
@@ -73,15 +74,32 @@ export function initBridgeServer(winWebContents, { port = 35320, chooseAccount }
         })
         const key = JSON.stringify([revision, site.identity, projectKey(site)])
         if (!pendingLookups.has(key)) {
-          const pending = resolveProjectLookup(
-            listCredentialsByIdentity(site.identity),
-            site,
-            (options) => chooseProject(options, valid)
-          )
+          const pending = { consumers: new Set(), promise: null }
           pendingLookups.set(key, pending)
-          void pending.finally(() => pendingLookups.delete(key)).catch(() => {})
+          pending.promise = Promise.resolve().then(() =>
+            resolveProjectLookup(listCredentialsByIdentity(site.identity), site, (options) =>
+              chooseProject(options, () => valid() && pending.consumers.size > 0)
+            )
+          )
+          void pending.promise
+            .finally(() => {
+              if (pendingLookups.get(key) === pending) pendingLookups.delete(key)
+            })
+            .catch(() => {})
         }
-        const result = await pendingLookups.get(key)
+        const pending = pendingLookups.get(key)
+        const consumer = {}
+        pending.consumers.add(consumer)
+        const disconnected = () => {
+          pending.consumers.delete(consumer)
+          if (!pending.consumers.size && pendingLookups.get(key) === pending)
+            pendingLookups.delete(key)
+        }
+        res.once('close', disconnected)
+        const result = await pending.promise
+        res.removeListener('close', disconnected)
+        pending.consumers.delete(consumer)
+        if (res.destroyed) return
         if (!valid()) return sendJson(res, 423, { ok: false, error: 'Vault locked', accounts: [] })
         const currentRecords = listCredentialsByIdentity(site.identity)
         const accounts = result.accounts.flatMap((chosen) => {

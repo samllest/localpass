@@ -14,9 +14,27 @@ const payload = path.join(directory, 'payload')
 const marker = path.join(directory, 'starts.log')
 let uninstaller
 
+// Newly built executables can remain briefly locked by Windows file scanning.
+// Retry only process creation; never rerun an installer that already started.
+async function spawnReady(executable, args, options) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const child = spawn(executable, args, options)
+      await new Promise((resolve, reject) => {
+        child.once('spawn', resolve)
+        child.once('error', reject)
+      })
+      return child
+    } catch (error) {
+      if (attempt >= 9 || !['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) throw error
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+    }
+  }
+}
+
 async function run(executable, args) {
+  const child = await spawnReady(executable, args, { windowsHide: true, stdio: 'inherit' })
   await new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { windowsHide: true, stdio: 'inherit' })
     const timeout = setTimeout(() => {
       child.kill()
       reject(new Error('Installer process timed out'))
@@ -112,7 +130,7 @@ async function waitFor(predicate) {
     0,
     'silent fresh installation must not unexpectedly start a previously stopped app'
   )
-  const initial = spawn(path.join(installed, name + '.exe'), [], {
+  const initial = await spawnReady(path.join(installed, name + '.exe'), [], {
     windowsHide: true,
     detached: true,
     stdio: 'ignore'

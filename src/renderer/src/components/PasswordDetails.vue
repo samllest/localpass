@@ -4,11 +4,7 @@
       <button class="text-button back-button" @click="$emit('back')">
         <UiIcon name="chevron-right" />返回列表
       </button>
-      <span class="detail-kind"
-        ><UiIcon :name="group.category === 'app' ? 'nav-app' : 'nav-web'" />{{
-          group.category === 'app' ? '应用密码' : '网站密码'
-        }}</span
-      >
+      <span class="detail-kind">{{ group.category === 'app' ? '应用密码' : '网站密码' }}</span>
       <div class="detail-top-actions">
         <button
           v-if="group.accounts.length === 1"
@@ -35,144 +31,146 @@
         </details>
       </div>
     </div>
-    <div class="detail-title">
-      <SiteAvatar :record="group" large />
-      <div>
-        <h1>{{ group.display_name }}</h1>
-        <p><SiteAddress :identity="group.identity" :website="group.category === 'web'" /></p>
-      </div>
-    </div>
-    <dl v-if="group.page_title || group.project_name" class="site-tab-metadata site-metadata">
-      <div v-if="group.project_name">
-        <dt><UiIcon name="nav-app" />项目名称</dt>
-        <dd>{{ group.project_name }}</dd>
-      </div>
-      <div v-if="group.page_title">
-        <dt><UiIcon name="browser-tab" />网页标签</dt>
-        <dd>{{ group.page_title }}</dd>
-      </div>
-    </dl>
-    <div class="detail-section-heading">
-      <h2>登录账号</h2>
-      <span>{{ group.accounts.length }} 个已保存账号</span>
-    </div>
-    <article
-      v-for="(account, index) in group.accounts"
-      :key="recordId(account)"
-      class="account-section"
-    >
-      <header v-if="group.accounts.length > 1" class="multi-account-heading">
-        <h3>账号 {{ index + 1 }}</h3>
+    <div class="detail-scroll">
+      <div class="detail-title">
+        <SiteAvatar :record="group" large />
         <div>
-          <button class="text-button" @click="accountAction('edit', account)">编辑</button
-          ><button class="text-button danger-text" @click="accountAction('delete', account)">
-            删除
-          </button>
+          <h1>{{ group.display_name }}</h1>
+          <p><SiteAddress :identity="group.identity" :website="group.category === 'web'" /></p>
         </div>
-      </header>
-      <div class="credential-card">
-        <div class="credential-field">
-          <div>
-            <label>用户名</label>
-            <p>{{ account.username || '未填写用户名' }}</p>
-          </div>
-          <button
-            class="icon-button"
-            aria-label="复制用户名"
-            :disabled="!account.username"
-            @click="$emit('copy', account.username)"
-          >
-            <UiIcon name="copy" />
-          </button>
+      </div>
+      <dl v-if="group.page_title || group.project_name" class="site-tab-metadata site-metadata">
+        <div v-if="group.project_name">
+          <dt>项目名称</dt>
+          <dd>{{ group.project_name }}</dd>
         </div>
-        <div class="credential-field">
+        <div v-if="group.page_title">
+          <dt>网页标签</dt>
+          <dd>{{ group.page_title }}</dd>
+        </div>
+      </dl>
+      <div class="detail-section-heading">
+        <h2>登录账号</h2>
+        <span>{{ group.accounts.length }} 个已保存账号</span>
+      </div>
+      <article
+        v-for="(account, index) in group.accounts"
+        :key="recordId(account)"
+        class="account-section"
+      >
+        <header v-if="group.accounts.length > 1" class="multi-account-heading">
+          <h3>账号 {{ index + 1 }}</h3>
           <div>
-            <label>密码</label>
-            <p class="secret-text" :class="{ concealed: !visible.has(recordId(account)) }">
-              {{ visible.has(recordId(account)) ? account.password : '••••••••••••' }}
-            </p>
+            <button class="text-button" @click="accountAction('edit', account)">编辑</button
+            ><button class="text-button danger-text" @click="accountAction('delete', account)">
+              删除
+            </button>
           </div>
-          <button
-            class="icon-button"
-            :aria-label="visible.has(recordId(account)) ? '隐藏密码' : '显示密码'"
-            :aria-pressed="visible.has(recordId(account))"
-            @click="togglePassword(recordId(account))"
-          >
-            <UiIcon name="eye" /></button
+        </header>
+        <div class="credential-card">
+          <div class="credential-field">
+            <div>
+              <label>用户名</label>
+              <p>{{ account.username || '未填写用户名' }}</p>
+            </div>
+            <button
+              class="icon-button"
+              aria-label="复制用户名"
+              :disabled="!account.username"
+              @click="$emit('copy', account.username)"
+            >
+              <UiIcon name="copy" />
+            </button>
+          </div>
+          <div class="credential-field">
+            <div>
+              <label>密码</label>
+              <p class="secret-text" :class="{ concealed: !visible.has(recordId(account)) }">
+                {{ visible.has(recordId(account)) ? account.password : '••••••••••' }}
+              </p>
+            </div>
+            <button
+              class="icon-button"
+              :aria-label="visible.has(recordId(account)) ? '隐藏密码' : '显示密码'"
+              :aria-pressed="visible.has(recordId(account))"
+              @click="togglePassword(recordId(account))"
+            >
+              <UiIcon name="eye" /></button
+            ><button
+              class="icon-button"
+              aria-label="复制密码"
+              @click="$emit('copy', account.password)"
+            >
+              <UiIcon name="copy" />
+            </button>
+          </div>
+        </div>
+        <footer v-if="group.accounts.length > 1" class="credential-actions">
+          <span>更新于 {{ formatDate(account.captured_at) }}</span
           ><button
-            class="icon-button"
-            aria-label="复制密码"
-            @click="$emit('copy', account.password)"
+            class="text-button history-toggle"
+            :aria-expanded="historyOpen === recordId(account)"
+            @click="toggleHistory(account)"
           >
-            <UiIcon name="copy" />
+            <UiIcon name="nav-recent" />历史版本
           </button>
+        </footer>
+        <PasswordHistory
+          v-if="group.accounts.length > 1 && historyOpen === recordId(account)"
+          :items="history"
+          :visible="visible"
+          :loading="historyLoading"
+          :error="historyError"
+          @retry="loadHistory(historyAccount)"
+          @toggle="togglePassword"
+          @copy="$emit('copy', $event)"
+        />
+      </article>
+      <div class="detail-section-heading">
+        <h2>{{ group.category === 'app' ? '应用信息' : '网站信息' }}</h2>
+      </div>
+      <dl class="site-information">
+        <div>
+          <dt>{{ group.category === 'app' ? '应用名称' : '网站名称' }}</dt>
+          <dd>{{ group.site_name || group.display_name }}</dd>
         </div>
-      </div>
-      <footer v-if="group.accounts.length > 1" class="credential-actions">
-        <span>更新于 {{ formatDate(account.captured_at) }}</span
-        ><button
-          class="text-button history-toggle"
-          :aria-expanded="historyOpen === recordId(account)"
-          @click="toggleHistory(account)"
-        >
-          <UiIcon name="nav-recent" />历史版本
-        </button>
-      </footer>
-      <PasswordHistory
-        v-if="group.accounts.length > 1 && historyOpen === recordId(account)"
-        :items="history"
-        :visible="visible"
-        :loading="historyLoading"
-        :error="historyError"
-        @retry="loadHistory(historyAccount)"
-        @toggle="togglePassword"
-        @copy="$emit('copy', $event)"
-      />
-    </article>
-    <div class="detail-section-heading">
-      <h2>{{ group.category === 'app' ? '应用信息' : '网站信息' }}</h2>
+        <div>
+          <dt>{{ group.category === 'app' ? '应用标识' : '网站地址' }}</dt>
+          <dd>
+            <a v-if="url" :href="url" target="_blank" rel="noopener noreferrer"
+              ><span
+                ><span class="address-protocol">{{ protocol }}</span
+                ><SiteAddress :identity="group.identity" /></span
+              ><UiIcon name="external" /></a
+            ><span v-else>{{ group.identity }}</span
+            ><span v-if="localAddress" class="address-tag">内网</span>
+          </dd>
+        </div>
+      </dl>
+      <template v-if="group.accounts.length === 1">
+        <footer class="credential-actions">
+          <span>更新于 {{ formatDate(group.accounts[0].captured_at) }}</span
+          ><button
+            class="text-button history-toggle"
+            :aria-expanded="historyOpen === recordId(group.accounts[0])"
+            @click="toggleHistory(group.accounts[0])"
+          >
+            <UiIcon name="nav-recent" />历史版本
+          </button>
+        </footer>
+        <PasswordHistory
+          v-if="historyOpen === recordId(group.accounts[0])"
+          :items="history"
+          :visible="visible"
+          :loading="historyLoading"
+          :error="historyError"
+          @retry="loadHistory(historyAccount)"
+          @toggle="togglePassword"
+          @copy="$emit('copy', $event)"
+        />
+      </template>
+      <p class="page-footnote">复制内容 30 秒后自动从剪贴板清除</p>
     </div>
-    <dl class="site-information">
-      <div>
-        <dt>{{ group.category === 'app' ? '应用名称' : '网站名称' }}</dt>
-        <dd>{{ group.site_name || group.display_name }}</dd>
-      </div>
-      <div>
-        <dt>{{ group.category === 'app' ? '应用标识' : '网站地址' }}</dt>
-        <dd>
-          <a v-if="url" :href="url" target="_blank" rel="noopener noreferrer"
-            ><span
-              ><span class="address-protocol">{{ protocol }}</span
-              ><SiteAddress :identity="group.identity" /></span
-            ><UiIcon name="external" /></a
-          ><span v-else>{{ group.identity }}</span
-          ><span v-if="localAddress" class="address-tag">内网</span>
-        </dd>
-      </div>
-    </dl>
-    <template v-if="group.accounts.length === 1">
-      <footer class="credential-actions">
-        <span>更新于 {{ formatDate(group.accounts[0].captured_at) }}</span
-        ><button
-          class="text-button history-toggle"
-          :aria-expanded="historyOpen === recordId(group.accounts[0])"
-          @click="toggleHistory(group.accounts[0])"
-        >
-          <UiIcon name="nav-recent" />历史版本
-        </button>
-      </footer>
-      <PasswordHistory
-        v-if="historyOpen === recordId(group.accounts[0])"
-        :items="history"
-        :visible="visible"
-        :loading="historyLoading"
-        :error="historyError"
-        @retry="loadHistory(historyAccount)"
-        @toggle="togglePassword"
-        @copy="$emit('copy', $event)"
-      />
-    </template>
-    <p class="page-footnote"><UiIcon name="lock" />复制后 30 秒自动清除剪贴板</p>
   </section>
 </template>
 

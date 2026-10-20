@@ -31,6 +31,8 @@ $html = $template.Replace('__EXTENSION_VERSION__', $extensionVersion).Replace('_
 $guide = @"
 LocalPass $version 使用说明
 
+桌面端 1.4.3 还原新版界面，修复输入文字底部裁切；插件 1.3.1 修复账号选择窗口重复弹出。
+
 1. 运行 $installerName 安装桌面端，然后注册自己的本地账号与主密码。
 2. 解压 $extensionName，保留其中 chrome-extension 文件夹。
 3. Chrome 打开 chrome://extensions/（Edge 为 edge://extensions/），开启开发者模式。

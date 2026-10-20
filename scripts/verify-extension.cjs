@@ -284,7 +284,7 @@ if (!process.versions.electron) {
     await test('out-of-order responses only show the most recent focused field', async () => {
       await evaluate(() => {
         document.querySelector('#username').focus()
-        document.querySelector('#password').focus()
+        document.querySelector('#other-user').focus()
         qa.reply(1)
         qa.reply(0)
       })
@@ -294,6 +294,84 @@ if (!process.versions.electron) {
       )
       await evaluate(() => qa.click(qa.picker().querySelector('button')))
       assert.equal(await evaluate(() => !!qa.picker()), false)
+    })
+    await test('desktop focus transfer and restored focus reuse one lookup; cancellation waits for an explicit click', async () => {
+      await evaluate(() => {
+        const input = document.querySelector('#password')
+        input.focus()
+        input.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }))
+        window.dispatchEvent(new Event('blur'))
+        document.querySelector('#username').focus()
+        input.focus()
+      })
+      assert.equal(await evaluate(() => qa.callbacks.length), 1)
+      assert.equal(
+        await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOOKUP_CANCEL')),
+        false
+      )
+      await evaluate(() => {
+        qa.callbacks[0]({ ok: true, selected: false, accounts: [] })
+        const input = document.querySelector('#password')
+        input.blur()
+        input.focus()
+      })
+      assert.equal(await evaluate(() => qa.callbacks.length), 1)
+      await evaluate(() => qa.click(document.querySelector('#password')))
+      assert.equal(await evaluate(() => qa.callbacks.length), 2)
+    })
+    await test('selected desktop accounts fill once and never prompt again on restored focus', async () => {
+      await evaluate(() => {
+        const input = document.querySelector('#password')
+        input.focus()
+        window.dispatchEvent(new Event('blur'))
+        document.querySelector('#username').focus()
+        qa.callbacks[0]({
+          ok: true,
+          selected: true,
+          accounts: [{ username: 'chosen', password: 'synthetic-only' }]
+        })
+        document.querySelector('#username').focus()
+        input.focus()
+      })
+      assert.equal(await evaluate(() => qa.callbacks.length), 1)
+      assert.equal(
+        await evaluate(() => document.querySelector('#password').value),
+        'synthetic-only'
+      )
+    })
+    await test('navigation and typing cancel native lookups and ignore late selected responses', async () => {
+      for (const action of ['typing', 'navigation']) {
+        await reset()
+        await evaluate((action) => {
+          const input = document.querySelector('#password')
+          input.focus()
+          window.dispatchEvent(new Event('blur'))
+          if (action === 'typing') {
+            input.value = 'user-typed'
+            input.dispatchEvent(new Event('input', { bubbles: true }))
+          } else {
+            history.pushState({}, '', '/dashboard')
+            document.querySelector('#login').remove()
+          }
+        }, action)
+        await pause()
+        assert.equal(
+          await evaluate(() =>
+            qa.messages.some(
+              (m) => m.type === 'LP_LOOKUP_CANCEL' && m.requestId === qa.messages[0].requestId
+            )
+          ),
+          true
+        )
+        await evaluate(() =>
+          qa.callbacks[0]({
+            ok: true,
+            selected: true,
+            accounts: [{ username: 'stale', password: 'stale' }]
+          })
+        )
+        assert.notEqual(await evaluate(() => document.querySelector('#username')?.value), 'stale')
+      }
     })
     await test('cross-port SPA login confirms only after route transition and login form disappearance', async () => {
       await evaluate(() => {

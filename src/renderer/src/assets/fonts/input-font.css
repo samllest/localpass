@@ -1,0 +1,13 @@
+/* The design export has zero descent, although its glyphs extend below the
+   baseline. Native editable controls clip those glyphs unless their font has
+   real ascent/descent metrics. Keep a separate face for editable text. */
+@font-face {
+  font-family: 'LocalPass Ardot Input';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./ardot-400.woff2') format('woff2');
+  ascent-override: 116%;
+  descent-override: 29%;
+  line-gap-override: 0%;
+}

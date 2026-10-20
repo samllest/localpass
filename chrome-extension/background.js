@@ -1,6 +1,7 @@
 /* global chrome */
 
 const pendingCaptures = {}
+const pendingLookups = new Map()
 const CAPTURE_CONFIRM_DELAY_MS = 1800
 
 function clearPendingCapture(tabId, capture) {
@@ -141,14 +142,14 @@ async function sendCapture(tabId, capture) {
   }
 }
 
-async function lookupAccounts(identity, metadata = {}) {
+async function lookupAccounts(identity, metadata = {}, signal) {
   const url = new URL('http://127.0.0.1:35320/lookup')
   url.searchParams.set('identity', identity)
   for (const key of ['site_name', 'page_title', 'project_name']) {
     if (metadata[key]) url.searchParams.set(key, String(metadata[key]).slice(0, 256))
   }
 
-  const response = await fetch(url)
+  const response = await fetch(url, { signal })
   const data = await response.json()
   if (!response.ok || !data.ok) {
     throw new Error(data.error || 'LocalPass lookup failed')
@@ -157,6 +158,17 @@ async function lookupAccounts(identity, metadata = {}) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const lookupKey = JSON.stringify([
+    sender.tab?.id,
+    sender.frameId,
+    sender.documentId || sender.url,
+    message.requestId
+  ])
+  if (message.type === 'LP_LOOKUP_CANCEL') {
+    pendingLookups.get(lookupKey)?.abort()
+    sendResponse({ ok: true })
+    return false
+  }
   if (message.type === 'LP_LOOKUP') {
     // The sender URL preserves the port even for older content scripts.
     let identity = message.identity
@@ -165,9 +177,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } catch {
       /* Use the supplied identity. */
     }
-    lookupAccounts(identity, message)
+    const controller = new AbortController()
+    if (message.requestId) pendingLookups.set(lookupKey, controller)
+    lookupAccounts(identity, message, controller.signal)
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message, accounts: [] }))
+      .finally(() => {
+        if (pendingLookups.get(lookupKey) === controller) pendingLookups.delete(lookupKey)
+      })
     return true
   }
 

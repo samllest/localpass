@@ -1,7 +1,7 @@
 <template>
   <section
     v-if="settings || showBanner"
-    :class="settings ? 'settings-card' : 'update-banner'"
+    :class="settings ? 'settings-card update-settings' : 'update-banner'"
     aria-label="应用更新"
   >
     <div :class="settings ? 'preference-row' : 'update-banner-content'">
@@ -81,7 +81,6 @@
             保存地址
           </button>
         </form>
-        <p>需要连接公司内网；服务器地址变化时，可在此修改。</p>
       </details>
     </div>
     <p v-if="actionError" class="update-action-error form-err" role="alert">{{ actionError }}</p>
@@ -131,10 +130,14 @@ async function saveServer() {
 
 <style scoped>
 .update-banner {
-  flex-shrink: 0;
+  position: absolute;
+  z-index: 50;
+  inset: 0 0 auto;
+  height: 56px;
   background: var(--accent-soft);
-  border-bottom: 1px solid var(--border);
-  padding: var(--space-3) var(--space-6);
+  border: 1px solid #d4e0ff;
+  padding: 8px 24px;
+  font-size: 12px;
 }
 .update-banner-content,
 .update-actions {
@@ -149,44 +152,89 @@ async function saveServer() {
   min-width: 0;
 }
 .update-description p {
-  font-size: var(--font-label);
-  color: var(--text-2);
-  margin-top: var(--space-2);
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--text-3);
+  margin-top: 3px;
 }
 .update-actions {
   flex-shrink: 0;
 }
 progress {
-  width: 100%;
-  height: var(--space-2);
-  margin-top: var(--space-3);
+  display: block;
+  width: 320px;
+  max-width: 100%;
+  height: 3px;
+  appearance: none;
+  border: 0;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
   accent-color: var(--accent);
 }
+progress::-webkit-progress-bar {
+  background: var(--bg-3);
+}
+progress::-webkit-progress-value {
+  background: var(--accent);
+}
+.update-banner .button {
+  min-height: 32px;
+  padding: 0 16px;
+  font-size: 12px;
+}
+.update-banner .button-subtle {
+  padding-inline: 0;
+}
+.update-banner .update-description strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  line-height: 17px;
+}
+.update-banner .update-description p {
+  margin-top: 0;
+  color: var(--text-1);
+  font-weight: 500;
+  line-height: 17px;
+}
+
 .update-server {
   width: 100%;
-  font-size: var(--font-label);
+  font-size: 12px;
+}
+.update-settings > .preference-row:first-child {
+  min-height: 93px;
+}
+.update-settings > .preference-row:has(> .update-server) {
+  min-height: 48px;
+  padding: 14px 20px;
 }
 .update-server summary {
+  font-size: 13px;
+  line-height: 19px;
   cursor: pointer;
 }
 .update-server form {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
+  gap: 6px;
+  margin-top: 14px;
+  margin-bottom: 4px;
 }
 .update-server label {
+  line-height: 17px;
   flex-basis: 100%;
   color: var(--text-2);
 }
 .update-server input {
   flex: 1;
   min-width: 0;
-  min-height: var(--control-h);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-s);
-  background: var(--bg-1);
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--bg-2);
   color: var(--text-1);
   user-select: text;
 }

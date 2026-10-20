@@ -2,7 +2,7 @@
   <div class="password-manager">
     <aside class="manager-sidebar">
       <div class="manager-brand">
-        <span class="manager-brand-icon"><UiIcon name="key" /></span>
+        <span class="manager-brand-icon"><UiIcon name="brand-sidebar" /></span>
         <div><strong>LocalPass</strong><small>你的本地密码管理器</small></div>
       </div>
       <nav aria-label="主导航">
@@ -21,9 +21,8 @@
       </nav>
       <div class="sidebar-bottom">
         <div class="sidebar-privacy">
-          <UiIcon name="shield-check" /><strong>只保存在这台设备</strong>
+          <UiIcon name="shield" /><strong>只保存在这台设备 · 密码由你掌管</strong>
         </div>
-        <p>密码由你掌管</p>
         <button class="sidebar-lock" :disabled="locking" @click="lock">
           <UiIcon name="lock" /><span>{{ locking ? '正在锁定…' : '锁定密码库' }}</span>
         </button>
@@ -31,7 +30,7 @@
     </aside>
 
     <div class="manager-workspace">
-      <header class="manager-header">
+      <header class="manager-header" :class="{ 'settings-header': page === 'settings' }">
         <h1 class="manager-page-title">
           {{ page === 'passwords' ? '密码管理器' : page === 'checkup' ? '密码检查' : '设置' }}
         </h1>
@@ -51,7 +50,9 @@
           <kbd v-else>Ctrl K</kbd>
         </div>
         <button class="button button-primary header-add" @click="openAdd()">
-          <UiIcon name="plus-white" /><span>添加密码</span>
+          <UiIcon name="plus-white" /><span>{{
+            page === 'settings' ? '＋ 添加密码' : '添加密码'
+          }}</span>
         </button>
         <button
           class="icon-button mobile-lock"
@@ -66,7 +67,7 @@
       <main
         ref="mainContent"
         class="manager-content"
-        :class="{ 'vault-content': page === 'passwords' }"
+        :class="{ 'vault-content': page === 'passwords' || page === 'checkup' }"
       >
         <div v-if="loadError" class="inline-error" role="alert">
           <span>{{ loadError }}</span
@@ -83,14 +84,17 @@
           <section ref="listPanel" class="password-list-panel" aria-label="密码列表">
             <div class="list-panel-heading">
               <h2>
-                全部密码 <span>{{ groups.length }} 个网站和应用</span>
+                全部密码
+                <span>{{
+                  batchMode ? `已选择 ${selectedIds.size} 项` : `${groups.length} 个网站和应用`
+                }}</span>
               </h2>
               <button
                 v-if="filtered.length || batchMode"
                 class="text-button batch-toggle"
                 @click="toggleBatch"
               >
-                {{ batchMode ? '完成' : '选择' }}
+                {{ batchMode ? '取消' : '选择' }}
               </button>
             </div>
             <div class="list-toolbar">
@@ -113,9 +117,7 @@
                 </select></label
               >
             </div>
-            <p v-if="query" class="search-summary" role="status">
-              找到 {{ filtered.length }} 个结果
-            </p>
+            <p v-if="query" class="sr-only" role="status">找到 {{ filtered.length }} 个结果</p>
             <div v-if="batchMode && filtered.length" class="selection-bar">
               <label
                 ><input
@@ -139,7 +141,9 @@
                   v-for="group in filtered"
                   :key="group.key"
                   class="password-list-row"
-                  :class="{ selected: !batchMode && selectedKey === group.key }"
+                  :class="{
+                    selected: batchMode ? selectedIds.has(group.key) : selectedKey === group.key
+                  }"
                 >
                   <input
                     v-if="batchMode"
@@ -188,7 +192,7 @@
             <p class="list-panel-footer"><span class="status-dot" />密码已加密保存在本机</p>
           </section>
           <PasswordDetails
-            v-if="selectedGroup && !batchMode"
+            v-if="selectedGroup && (!batchMode || isWide)"
             :key="selectedGroup.key"
             :group="selectedGroup"
             @back="backToList"
@@ -210,89 +214,15 @@
           </div>
         </div>
         <template v-else>
-          <div class="page-container">
-            <template v-if="page === 'checkup'">
-              <div class="page-heading">
-                <div>
-                  <h1>密码检查</h1>
-                  <p>及时发现问题，让每个账号更安全。</p>
-                </div>
-                <button class="button button-outline" :disabled="loading" @click="runCheck">
-                  {{ loading ? '检查中…' : '重新检查' }}
-                </button>
-              </div>
-              <section class="checkup-overview">
-                <div class="checkup-symbol" :class="{ warning: report.affected }">
-                  <UiIcon name="shield-check" />
-                </div>
-                <h2>
-                  {{
-                    !report.total
-                      ? '添加密码后即可开始检查'
-                      : report.affected
-                        ? `${report.affected} 个账号需要留意`
-                        : '未发现重复或强度不足的密码'
-                  }}
-                </h2>
-                <p>
-                  {{
-                    report.total
-                      ? `已检查 ${report.total} 个账号的已保存密码`
-                      : '检查结果会显示在这里'
-                  }}
-                </p>
-                <small v-if="checkedAt">上次检查：{{ checkedAt }}</small>
-              </section>
-              <div class="checkup-list">
-                <button
-                  class="checkup-row"
-                  :aria-expanded="riskFilter === 'reused'"
-                  @click="riskFilter = riskFilter === 'reused' ? '' : 'reused'"
-                >
-                  <span class="checkup-row-icon" :class="{ warning: report.reused.length }"
-                    ><UiIcon name="copy" /></span
-                  ><span
-                    ><strong>{{ report.reused.length }} 个账号重复使用了密码</strong
-                    ><small>为不同账号设置独一无二的密码</small></span
-                  ><UiIcon name="chevron-right" :class="{ rotated: riskFilter === 'reused' }" />
-                </button>
-                <button
-                  class="checkup-row"
-                  :aria-expanded="riskFilter === 'weak'"
-                  @click="riskFilter = riskFilter === 'weak' ? '' : 'weak'"
-                >
-                  <span class="checkup-row-icon" :class="{ warning: report.weak.length }"
-                    ><UiIcon name="key" /></span
-                  ><span
-                    ><strong>{{ report.weak.length }} 个账号的密码强度不足</strong
-                    ><small>使用更长、更难猜测的密码</small></span
-                  ><UiIcon name="chevron-right" :class="{ rotated: riskFilter === 'weak' }" />
-                </button>
-              </div>
-              <section v-if="riskFilter" class="risk-results">
-                <h2>{{ riskFilter === 'weak' ? '建议加强的密码' : '建议更换的重复密码' }}</h2>
-                <p v-if="!riskAccounts.length" class="muted">未发现此类问题。</p>
-                <div v-else class="password-list">
-                  <button
-                    v-for="account in riskAccounts"
-                    :key="recordId(account)"
-                    class="password-row"
-                    @click="selectAccount(account)"
-                  >
-                    <SiteAvatar :record="account" /><span class="site-description"
-                      ><strong>{{ account.display_name }}</strong
-                      ><small>{{ account.username || account.identity }}</small></span
-                    ><span class="site-account">查看账号</span><UiIcon name="chevron-right" />
-                  </button>
-                </div>
-              </section>
-              <div class="privacy-note">
-                <UiIcon name="shield" />
-                <p>
-                  检查在本机完成，密码不会上传。结果基于密码长度、字符组合和重复情况，不包含互联网泄露数据库检测。
-                </p>
-              </div>
-            </template>
+          <div class="page-container" :class="{ 'checkup-container': page === 'checkup' }">
+            <PasswordCheckup
+              v-if="page === 'checkup'"
+              :records="apps"
+              :checked-at="checkedAt"
+              :loading="loading"
+              @refresh="runCheck"
+              @select-account="selectAccount"
+            />
 
             <template v-else>
               <div class="page-heading">
@@ -385,7 +315,7 @@
               </section>
               <h2 class="section-title">在浏览器中使用</h2>
               <section class="settings-card extension-card">
-                <span class="extension-icon"><UiIcon name="nav-web" /></span>
+                <span class="extension-icon" aria-hidden="true">◎</span>
                 <div>
                   <h3>与 LocalPass 浏览器扩展配合使用</h3>
                   <p>解锁密码库后，扩展可以保存登录信息，并在网站登录时提供账号选择。</p>
@@ -405,7 +335,9 @@
               </section>
               <h2 class="section-title">版本与更新</h2>
               <AppUpdate settings />
-              <p class="page-footnote"><UiIcon name="shield" />LocalPass · 本地加密密码管理器</p>
+              <p class="page-footnote">
+                <span aria-hidden="true">◈</span>LocalPass · 本地密码管理器
+              </p>
             </template>
           </div>
         </template>
@@ -466,7 +398,8 @@ import AddEditModal from './AddEditModal.vue'
 import PasswordDetails from './PasswordDetails.vue'
 import VaultDialog from './VaultDialog.vue'
 import AppUpdate from './AppUpdate.vue'
-import { checkPasswords, filterGroups, groupAccounts, groupKey, recordId } from '../utils/vault'
+import PasswordCheckup from './PasswordCheckup.vue'
+import { filterGroups, groupAccounts, groupKey, recordId } from '../utils/vault'
 
 const navigation = [
   { id: 'passwords', label: '密码', icon: 'key' },
@@ -514,7 +447,6 @@ const closePreferenceDescription = computed(() => {
 })
 const locking = ref(false)
 const toast = ref(null)
-const riskFilter = ref('')
 const checkedAt = ref('')
 const savedTheme = localStorage.getItem('localpass-theme')
 const theme = ref(['light', 'dark', 'system'].includes(savedTheme) ? savedTheme : 'light')
@@ -528,8 +460,6 @@ let listFocusKey = null
 const groups = computed(() => groupAccounts(apps.value))
 const filtered = computed(() => filterGroups(groups.value, query.value, category.value, sort.value))
 const selectedGroup = computed(() => groups.value.find((group) => group.key === selectedKey.value))
-const report = computed(() => checkPasswords(apps.value))
-const riskAccounts = computed(() => report.value[riskFilter.value] || [])
 const allSelected = computed(
   () =>
     filtered.value.length > 0 && filtered.value.every((group) => selectedIds.value.has(group.key))

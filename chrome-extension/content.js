@@ -72,6 +72,8 @@ let loginAttemptSequence = 0
 let lastPageState = ''
 let pageStateTimer = null
 let autofillSelection = null
+const lookupDocumentId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+let dismissedDesktopContext = null
 
 function reportPageState() {
   const state = {
@@ -147,6 +149,19 @@ function checkLoginOutcome() {
 function removePicker() {
   // Invalidate in-flight responses as well as removing the visible popup.
   lookupSequence++
+  if (pendingLookup) {
+    const context = pendingLookup
+    dismissedDesktopContext = context
+    try {
+      const sent = chrome.runtime.sendMessage({
+        type: 'LP_LOOKUP_CANCEL',
+        requestId: context.requestId
+      })
+      sent?.catch(() => {})
+    } catch {
+      // The extension may have been reloaded while a choice was pending.
+    }
+  }
   pendingLookup = null
   const previous = activePicker
   activePicker = null
@@ -271,31 +286,60 @@ function fillAccount(context, account) {
   }
 }
 
-function requestAutofill(input) {
+function sameLoginFields(left, right) {
+  return (
+    left?.passwordInput === right?.passwordInput && left?.usernameInput === right?.usernameInput
+  )
+}
+
+function requestAutofill(input, explicit = false) {
   if (filling || document.activeElement !== input) return
   const fields = findLoginFields(input)
   if (!fields) return
-  if (activePicker?.anchor === input || pendingLookup?.anchor === input) return
+  // A native chooser can blur/refocus either login field. Keep its original
+  // request rather than queuing another native window on focus restoration.
+  if (pendingLookup?.url === location.href && sameLoginFields(pendingLookup.fields, fields)) return
+  if (activePicker?.anchor === input) return
+  if (
+    !explicit &&
+    dismissedDesktopContext?.url === location.href &&
+    sameLoginFields(dismissedDesktopContext.fields, fields)
+  )
+    return
   removePicker()
-  const context = { fields, anchor: input, url: window.location.href, sequence: lookupSequence }
+  if (explicit) dismissedDesktopContext = null
+  const context = {
+    fields,
+    anchor: input,
+    url: window.location.href,
+    sequence: lookupSequence,
+    requestId: `${lookupDocumentId}:${lookupSequence}`
+  }
   pendingLookup = context
 
   try {
     chrome.runtime.sendMessage(
-      { type: 'LP_LOOKUP', identity: window.location.host, ...collectSiteMetadata() },
+      {
+        type: 'LP_LOOKUP',
+        requestId: context.requestId,
+        identity: window.location.host,
+        ...collectSiteMetadata()
+      },
       (response) => {
         const error = chrome.runtime.lastError
         if (context.sequence !== lookupSequence) return
         pendingLookup = null
+        if (context.blurred || response?.selected) dismissedDesktopContext = context
         if (
           error ||
           (context.blurred && !response?.selected) ||
           !response?.ok ||
           !response.accounts?.length ||
-          document.activeElement !== input ||
+          !sameLoginFields(findLoginFields(document.activeElement), fields) ||
           !validContext(context)
         )
           return
+        context.anchor = document.activeElement
         if (response.selected && response.accounts.length === 1)
           fillAccount(context, response.accounts[0])
         else showPicker(context, response.accounts)
@@ -429,7 +473,19 @@ document.addEventListener('focusin', (event) => {
 document.addEventListener('focusout', (event) => {
   const context = activePicker || pendingLookup
   if (!context || context.element?.contains(event.relatedTarget)) return
+  // relatedTarget is null when focus moves into the desktop chooser. A real
+  // click elsewhere, navigation, typing or hiding the form still cancels it.
+  if (pendingLookup && !event.relatedTarget) return
+  if (pendingLookup && sameLoginFields(findLoginFields(event.relatedTarget), context.fields)) return
   if (event.target === context.anchor || context.element?.contains(event.target)) removePicker()
+})
+document.addEventListener('input', (event) => {
+  if (
+    !filling &&
+    pendingLookup &&
+    sameLoginFields(findLoginFields(event.target), pendingLookup.fields)
+  )
+    removePicker()
 })
 document.addEventListener(
   'pointerdown',
@@ -444,7 +500,7 @@ document.addEventListener(
   'click',
   (event) => {
     if (event.target.closest?.('[data-localpass-picker]')) return
-    requestAutofill(event.target)
+    requestAutofill(event.target, true)
     tryCaptureLogin(event)
   },
   true

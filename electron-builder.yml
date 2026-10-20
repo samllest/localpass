@@ -7,6 +7,11 @@ files:
   - package.json
   - build/icon.png
 extraResources:
+  - from: src/renderer/src/assets/fonts
+    to: fonts
+    filter:
+      - '*.woff2'
+      - OFL.txt
   - from: chrome-extension
     to: chrome-extension
     filter:

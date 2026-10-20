@@ -59,11 +59,12 @@ if (!process.versions.electron) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         }).then((response) => response.json())
-      const lookup = (project) =>
+      const lookup = (project, options) =>
         fetch(
           base +
             '/lookup?' +
-            new URLSearchParams({ identity: 'localhost:3000', project_name: project })
+            new URLSearchParams({ identity: 'localhost:3000', project_name: project }),
+          options
         ).then((response) => response.json())
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
       async function promptWindow() {
@@ -134,7 +135,13 @@ if (!process.versions.electron) {
         path.join(__dirname, '../out/project-choice-fill.png'),
         (await window.webContents.capturePage()).toPNG()
       )
-      await clickChoice(window, '.account')
+      assert.equal(
+        await window.webContents.executeJavaScript("document.querySelector('#confirm').disabled"),
+        true
+      )
+      await window.webContents.executeJavaScript("document.querySelector('.account input').click()")
+      assert.equal(window.isDestroyed(), false)
+      await clickChoice(window, '#confirm')
       const chosen = await ambiguous
       assert.equal(chosen.selected, true)
       assert.equal(chosen.accounts.length, 1)
@@ -152,6 +159,63 @@ if (!process.versions.electron) {
       assert.equal((await lookup('项目 B')).accounts[0].password, 'Synthetic!B123')
       console.log(
         'PASS same-name chooser selects exactly one record; selection token routes capture to it'
+      )
+
+      const abandonedController = new AbortController()
+      const abandoned = lookup('项目 A', { signal: abandonedController.signal }).catch(
+        (error) => error.name
+      )
+      window = await promptWindow()
+      abandonedController.abort()
+      assert.equal(await abandoned, 'AbortError')
+      await wait(400)
+      assert.equal(window.isDestroyed(), true)
+      console.log('PASS leaving a login form aborts its lookup and closes the desktop chooser')
+
+      const sharedController = new AbortController()
+      const shared = lookup('项目 A', { signal: sharedController.signal }).catch(
+        (error) => error.name
+      )
+      window = await promptWindow()
+      const sharedCount = prompts
+      const survivor = lookup('项目 A')
+      await wait(80)
+      sharedController.abort()
+      assert.equal(await shared, 'AbortError')
+      await wait(250)
+      assert.equal(prompts, sharedCount)
+      assert.equal(window.isDestroyed(), false)
+      await clickChoice(window, '.account input')
+      await clickChoice(window, '#confirm')
+      assert.equal((await survivor).accounts.length, 1)
+      console.log(
+        'PASS concurrent lookups share one chooser; cancelling one does not cancel another'
+      )
+
+      const firstController = new AbortController()
+      const queuedController = new AbortController()
+      const first = lookup('项目 A', { signal: firstController.signal }).catch(
+        (error) => error.name
+      )
+      window = await promptWindow()
+      const queued = lookup('', { signal: queuedController.signal }).catch((error) => error.name)
+      await wait(80)
+      queuedController.abort()
+      await queued
+      firstController.abort()
+      await first
+      await wait(450)
+      assert.equal(
+        BrowserWindow.getAllWindows().filter((candidate) => candidate !== desktop).length,
+        0
+      )
+      const singleHtml = chooser.choiceHtml(
+        { identity: 'localhost:3000', accounts: [a], saving: false },
+        'fixture'
+      )
+      assert.equal(singleHtml.includes('匹配到多个账号'), false)
+      console.log(
+        'PASS abandoned queued lookups never reopen a stale prompt; single records use accurate copy'
       )
 
       const cancelled = lookup('项目 A')

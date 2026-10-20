@@ -1,5 +1,13 @@
 <template>
-  <VaultDialog :title="editing ? '编辑密码' : '添加密码'" :busy="saving" @close="$emit('close')">
+  <VaultDialog
+    :title="editing ? '编辑密码' : '添加密码'"
+    :class="[
+      'account-dialog',
+      { 'project-dialog': developmentSite, 'edit-dialog': editing, 'existing-dialog': defaults }
+    ]"
+    :busy="saving"
+    @close="$emit('close')"
+  >
     <form class="account-form" @submit.prevent="submit">
       <p class="form-intro">
         {{ editing ? '更新网站信息和登录账号' : '密码会加密保存在你的本地密码库中。' }}
@@ -102,7 +110,7 @@
             :disabled="saving"
             @click="showPassword = !showPassword"
           >
-            <UiIcon name="eye" />
+            {{ showPassword ? '隐藏' : '显示' }}
           </button>
         </div>
         <div v-if="form.password" class="password-strength" :class="strength.level">
@@ -116,7 +124,7 @@
           :disabled="saving"
           @click="generate"
         >
-          <UiIcon name="key" />生成强密码</button
+          <span aria-hidden="true">✦</span>生成强密码</button
         ><span v-if="generated" class="field-hint" role="status">已生成 20 位随机密码</span>
       </div>
       <p v-if="error" class="form-err" role="alert">{{ error }}</p>
@@ -138,7 +146,6 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import UiIcon from './UiIcon.vue'
 import SiteAvatar from './SiteAvatar.vue'
 import VaultDialog from './VaultDialog.vue'
 import { generatePassword, passwordStrength, recordId, websiteUrl } from '../utils/vault'
