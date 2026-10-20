@@ -145,7 +145,16 @@ function background(options = {}) {
       }),
     lookup: () =>
       new Promise((resolve) =>
-        onMessage({ type: 'LP_LOOKUP', identity: '10.0.15.33' }, { url: payload.page_url }, resolve)
+        onMessage(
+          {
+            type: 'LP_LOOKUP',
+            identity: '10.0.15.33',
+            site_name: payload.site_name,
+            project_name: 'Agent Router'
+          },
+          { url: payload.page_url },
+          resolve
+        )
       ),
     send: () => context.sendCapture(7, vm.runInContext('pendingCaptures[7]', context))
   }
@@ -155,6 +164,7 @@ test('background uses the sender URL port even with an old content script', asyn
   const fixture = background()
   await fixture.lookup()
   assert.equal(new URL(fixture.messages[0].url).searchParams.get('identity'), '10.0.15.33:3000')
+  assert.equal(new URL(fixture.messages[0].url).searchParams.get('project_name'), 'Agent Router')
 })
 
 test('Jenkins-style POST redirect saves only after the destination document confirms no login form or error', async () => {

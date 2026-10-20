@@ -1,17 +1,23 @@
 import { createServer } from 'http'
+import { randomUUID } from 'node:crypto'
 
 import {
   createApp,
-  findAppByIdentity,
+  getVaultRevision,
   isVaultUnlocked,
   listCredentialsByIdentity,
   updateApp
 } from './db.js'
 import { capturedSite } from '../shared/site-metadata.js'
+import { projectKey, projectName, isDevelopmentSite } from '../shared/project-matching.js'
+import { resolveProjectLookup, resolveProjectCapture } from './project-resolution.js'
 
 let webContents = null
 let server = null
 let startPromise = null
+let chooseProject = async () => null
+const selections = new Map()
+const pendingLookups = new Map()
 const MAX_CAPTURE_BODY_BYTES = 64 * 1024
 
 function normalizeField(value) {
@@ -23,14 +29,15 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload))
 }
 
-export function initBridgeServer(winWebContents, { port = 35320 } = {}) {
+export function initBridgeServer(winWebContents, { port = 35320, chooseAccount } = {}) {
   webContents = winWebContents
+  chooseProject = chooseAccount || (async () => null)
 
   if (server) {
     return startPromise
   }
 
-  server = createServer((req, res) => {
+  server = createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
@@ -56,13 +63,58 @@ export function initBridgeServer(winWebContents, { port = 35320 } = {}) {
       }
 
       try {
-        const accounts = listCredentialsByIdentity(identity).map((account) => ({
-          id: account.app_id,
-          username: account.username || '',
-          password: account.password,
-          displayName: account.display_name
-        }))
-        sendJson(res, 200, { ok: true, accounts })
+        const revision = getVaultRevision()
+        const valid = () => isVaultUnlocked() && getVaultRevision() === revision
+        const site = capturedSite({
+          identity,
+          site_name: requestUrl.searchParams.get('site_name'),
+          page_title: requestUrl.searchParams.get('page_title'),
+          project_name: requestUrl.searchParams.get('project_name')
+        })
+        const key = JSON.stringify([revision, site.identity, projectKey(site)])
+        if (!pendingLookups.has(key)) {
+          const pending = resolveProjectLookup(
+            listCredentialsByIdentity(site.identity),
+            site,
+            (options) => chooseProject(options, valid)
+          )
+          pendingLookups.set(key, pending)
+          void pending.finally(() => pendingLookups.delete(key)).catch(() => {})
+        }
+        const result = await pendingLookups.get(key)
+        if (!valid()) return sendJson(res, 423, { ok: false, error: 'Vault locked', accounts: [] })
+        const currentRecords = listCredentialsByIdentity(site.identity)
+        const accounts = result.accounts.flatMap((chosen) => {
+          const account = currentRecords.find(
+            (row) => row.app_id === chosen.app_id && projectKey(row) === projectKey(chosen)
+          )
+          if (!account) return []
+          const token = randomUUID()
+          if (isDevelopmentSite(site.identity)) {
+            for (const [key, value] of selections)
+              if (value.expires < Date.now()) selections.delete(key)
+            if (selections.size >= 500) selections.delete(selections.keys().next().value)
+            selections.set(token, {
+              id: account.app_id,
+              identity: site.identity,
+              project: projectKey(site),
+              username: account.username || '',
+              revision,
+              expires: Date.now() + 300000
+            })
+          }
+          return [
+            {
+              id: account.app_id,
+              username: account.username || '',
+              password: account.password,
+              displayName: account.display_name,
+              projectName: isDevelopmentSite(site.identity) ? projectName(account) : '',
+              selectionToken: token
+            }
+          ]
+        })
+        sendJson(res, 200, { ok: true, accounts, selected: result.selected })
       } catch (error) {
         console.error('[Bridge] Error loading credentials:', error)
         sendJson(res, 500, { ok: false, error: 'Internal error', accounts: [] })
@@ -89,7 +141,7 @@ export function initBridgeServer(winWebContents, { port = 35320 } = {}) {
       body += chunk.toString()
     })
 
-    req.on('end', () => {
+    req.on('end', async () => {
       try {
         if (!isVaultUnlocked()) {
           sendJson(res, 423, { ok: false, error: 'Vault locked' })
@@ -107,15 +159,46 @@ export function initBridgeServer(winWebContents, { port = 35320 } = {}) {
           return
         }
 
-        const existing = findAppByIdentity(identity, username)
+        const revision = getVaultRevision()
+        const valid = () => isVaultUnlocked() && getVaultRevision() === revision
+        const selection = selections.get(payload.selection_token)
+        const selectedId =
+          selection &&
+          selection.revision === revision &&
+          selection.expires > Date.now() &&
+          selection.identity === identity &&
+          selection.project === projectKey(site) &&
+          selection.username === (username || '')
+            ? selection.id
+            : null
+        const existing = await resolveProjectCapture(
+          listCredentialsByIdentity(identity),
+          site,
+          payload,
+          (options) => chooseProject(options, valid),
+          selectedId
+        )
+        if (!valid()) return sendJson(res, 423, { ok: false, error: 'Vault locked' })
+        if (existing === false)
+          return sendJson(res, 200, { ok: true, changed: false, cancelled: true })
+        // Re-read after an asynchronous choice: edits/deletions may happen while
+        // the prompt is open, and passwords must never cross vault sessions.
+        if (
+          existing &&
+          !listCredentialsByIdentity(identity).some((row) => row.app_id === existing.app_id)
+        ) {
+          return sendJson(res, 409, { ok: false, error: 'Record changed; retry login' })
+        }
         let changed = false
 
         if (existing) {
           const result = updateApp({
             ...site,
+            display_name: existing.display_name || site.display_name,
             // Keep a cached icon if the site's icon is temporarily unavailable.
+            project_name: existing.project_name || site.project_name,
             icon_data: site.icon_data || existing.icon_data,
-            app_id: existing.id,
+            app_id: existing.app_id,
             username,
             password
           })
@@ -163,6 +246,8 @@ export function initBridgeServer(winWebContents, { port = 35320 } = {}) {
 }
 
 export function closeBridgeServer() {
+  selections.clear()
+  pendingLookups.clear()
   const listener = server
   server = null
   startPromise = null

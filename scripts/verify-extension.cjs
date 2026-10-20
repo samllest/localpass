@@ -365,6 +365,49 @@ if (!process.versions.electron) {
       await evaluate(() => qa.reply(qa.callbacks.length - 1))
       assert.equal(await evaluate(() => !!qa.picker()), false)
     })
+    await test('a desktop choice survives browser blur, fills once, and carries its selection into capture', async () => {
+      await evaluate(() => {
+        qa.click(document.querySelector('#password'))
+        window.dispatchEvent(new Event('blur'))
+        qa.callbacks[qa.callbacks.length - 1]({
+          ok: true,
+          selected: true,
+          accounts: [
+            {
+              id: 12,
+              username: 'project-admin',
+              password: 'synthetic-project',
+              selectionToken: 'synthetic-selection'
+            }
+          ]
+        })
+      })
+      assert.equal(
+        await evaluate(() => document.querySelector('#password').value),
+        'synthetic-project'
+      )
+      assert.equal(await evaluate(() => !!qa.picker()), false)
+      await evaluate(() => qa.click(document.querySelector('#submit')))
+      const captured = await evaluate(
+        () => qa.messages.find((message) => message.type === 'LP_LOGIN_SUBMITTED').payload
+      )
+      assert.equal(captured.selection_token, 'synthetic-selection')
+      assert.equal(captured.project_name, 'Agent Router')
+    })
+    await test('a desktop choice cannot fill after the user changes the form or navigates', async () => {
+      await evaluate(() => {
+        qa.click(document.querySelector('#password'))
+        const callback = qa.callbacks[qa.callbacks.length - 1]
+        window.dispatchEvent(new Event('blur'))
+        document.querySelector('#password').remove()
+        callback({
+          ok: true,
+          selected: true,
+          accounts: [{ username: 'stale', password: 'synthetic-stale' }]
+        })
+      })
+      assert.notEqual(await evaluate(() => document.querySelector('#username').value), 'stale')
+    })
     await test('Jenkins markup captures native form data; real POST/302 navigation reports the new page state', async () => {
       await evaluate(() => {
         document.body.innerHTML =

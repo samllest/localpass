@@ -42,8 +42,12 @@
         <p><SiteAddress :identity="group.identity" :website="group.category === 'web'" /></p>
       </div>
     </div>
-    <dl v-if="group.page_title" class="site-tab-metadata site-metadata">
-      <div>
+    <dl v-if="group.page_title || group.project_name" class="site-tab-metadata site-metadata">
+      <div v-if="group.project_name">
+        <dt><UiIcon name="nav-app" />项目名称</dt>
+        <dd>{{ group.project_name }}</dd>
+      </div>
+      <div v-if="group.page_title">
         <dt><UiIcon name="browser-tab" />网页标签</dt>
         <dd>{{ group.page_title }}</dd>
       </div>

@@ -5,10 +5,16 @@ import { existsSync } from 'fs'
 import { getDbDir } from './storage.js'
 import { decryptSecret, deriveVaultKey, encryptSecret } from './vault-crypto.js'
 import { normalizeSiteMetadata } from '../shared/site-metadata.js'
+import { isDevelopmentSite, projectKey } from '../shared/project-matching.js'
 
 let db = null
 let masterKey = null
 let currentDbPath = null
+let vaultRevision = 0
+
+export function getVaultRevision() {
+  return vaultRevision
+}
 
 function ensureVaultOpen() {
   if (!db) {
@@ -53,6 +59,7 @@ export function setMasterPassword(password, salt) {
 
 export function clearMasterKey() {
   masterKey = null
+  vaultRevision++
 }
 
 export function closeVault() {
@@ -214,7 +221,7 @@ export function initDB(dbFilename, { createIfMissing = false } = {}) {
         .map((column) => column.name)
     )
     db.transaction(() => {
-      for (const column of ['site_name', 'page_title', 'site_url', 'icon_data']) {
+      for (const column of ['site_name', 'page_title', 'site_url', 'icon_data', 'project_name']) {
         if (!columns.has(column))
           db.exec(`ALTER TABLE apps ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`)
       }
@@ -256,7 +263,7 @@ function migrateUniqueIdentityConstraint() {
   db.pragma('foreign_keys = ON')
 }
 
-export function findAppByIdentity(identity, username) {
+export function findAppByIdentity(identity, username, project) {
   ensureVaultOpen()
 
   const normalizedIdentity = normalizeText(identity).trim()
@@ -267,19 +274,22 @@ export function findAppByIdentity(identity, username) {
   const normalizedUsername = normalizeUsername(username)
   const row = db
     .prepare(
-      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data,
+      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data, a.project_name,
               c.id AS credential_id, c.username, c.password_blob, c.iv,
               c.version_tag, c.captured_at
        FROM apps a
        LEFT JOIN credentials c ON c.app_id = a.id AND c.is_latest = 1
        WHERE a.identity = ?
          AND ((c.username = ?) OR (c.username IS NULL AND ? IS NULL))
-       ORDER BY a.id DESC
-       LIMIT 1`
+       ORDER BY a.id DESC`
     )
-    .get(normalizedIdentity, normalizedUsername, normalizedUsername)
+    .all(normalizedIdentity, normalizedUsername, normalizedUsername)
 
-  return row ? mapCredentialRow(row) : null
+  const matches =
+    project !== undefined && isDevelopmentSite(identity)
+      ? row.filter((record) => projectKey(record) === projectKey(project))
+      : row
+  return matches.length === 1 ? mapCredentialRow(matches[0]) : null
 }
 
 export function listApps() {
@@ -287,7 +297,7 @@ export function listApps() {
 
   return db
     .prepare(
-      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data,
+      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data, a.project_name,
               c.id AS credential_id, c.username, c.password_blob, c.iv,
               c.version_tag, c.captured_at
        FROM apps a
@@ -308,7 +318,7 @@ export function searchApps(query) {
 
   return db
     .prepare(
-      `SELECT a.id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data,
+      `SELECT a.id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data, a.project_name,
               c.username, c.password_blob, c.iv, c.version_tag, c.captured_at
        FROM apps a
        LEFT JOIN credentials c ON c.app_id = a.id AND c.is_latest = 1
@@ -340,7 +350,7 @@ export function createApp({
   const storedUsername = normalizeUsername(username)
 
   const insertApp = db.prepare(
-    `INSERT INTO apps (identity, display_name, category, site_name, page_title, site_url, icon_data) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO apps (identity, display_name, category, site_name, page_title, site_url, icon_data, project_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   )
   const insertCred = db.prepare(
     `INSERT INTO credentials (app_id, username, password_blob, iv, version_tag, is_latest)
@@ -355,7 +365,8 @@ export function createApp({
       site.site_name,
       site.page_title,
       site.site_url,
-      site.icon_data
+      site.icon_data,
+      site.project_name
     )
     insertCred.run(appResult.lastInsertRowid, storedUsername, blob, iv)
     return appResult.lastInsertRowid
@@ -419,13 +430,13 @@ export function updateApp({
       existingApp.identity !== nextAppFields.identity ||
       existingApp.display_name !== nextAppFields.display_name ||
       existingApp.category !== nextAppFields.category ||
-      ['site_name', 'page_title', 'site_url', 'icon_data'].some(
+      ['site_name', 'page_title', 'site_url', 'icon_data', 'project_name'].some(
         (key) => existingApp[key] !== site[key]
       )
 
     if (metadataChanged) {
       db.prepare(
-        `UPDATE apps SET identity = ?, display_name = ?, category = ?, site_name = ?, page_title = ?, site_url = ?, icon_data = ? WHERE id = ?`
+        `UPDATE apps SET identity = ?, display_name = ?, category = ?, site_name = ?, page_title = ?, site_url = ?, icon_data = ?, project_name = ? WHERE id = ?`
       ).run(
         nextAppFields.identity,
         nextAppFields.display_name,
@@ -434,6 +445,7 @@ export function updateApp({
         site.page_title,
         site.site_url,
         site.icon_data,
+        site.project_name,
         appId
       )
     }
@@ -503,7 +515,7 @@ export function listCredentialsByIdentity(identity) {
 
   return db
     .prepare(
-      `SELECT a.id AS app_id, a.identity, a.display_name, a.category,
+      `SELECT a.id AS app_id, a.identity, a.display_name, a.category, a.project_name, a.site_name, a.page_title, a.icon_data,
               c.id AS credential_id, c.username, c.password_blob, c.iv,
               c.version_tag, c.captured_at
        FROM apps a
@@ -526,6 +538,7 @@ export function exportVaultData() {
     page_title: record.page_title,
     site_url: record.site_url,
     icon_data: record.icon_data,
+    project_name: record.project_name,
     username: record.username,
     password: record.password
   }))
@@ -565,17 +578,28 @@ export function importVaultData(serialized) {
   }
 
   let imported = 0
+  const importedIds = new Set()
   for (const record of payload.records) {
     const identity = normalizeText(record.identity).trim()
     const password = normalizeText(record.password)
     if (!identity || !password) continue
 
     const username = normalizeUsername(record.username)
-    const existing = findAppByIdentity(identity, username)
+    const existing = isDevelopmentSite(identity)
+      ? listCredentialsByIdentity(identity).find(
+          (candidate) =>
+            !importedIds.has(candidate.app_id) &&
+            projectKey(candidate) === projectKey(record) &&
+            normalizeUsername(candidate.username) === username &&
+            candidate.password === password
+        )
+      : findAppByIdentity(identity, username, record)
     if (existing) {
-      updateApp({ ...record, app_id: existing.id, identity, username, password })
+      const id = existing.id ?? existing.app_id
+      updateApp({ ...record, app_id: id, identity, username, password })
+      importedIds.add(id)
     } else {
-      createApp({
+      const id = createApp({
         ...record,
         identity,
         display_name: normalizeText(record.display_name).trim() || identity,
@@ -583,6 +607,7 @@ export function importVaultData(serialized) {
         username,
         password
       })
+      importedIds.add(Number(id))
     }
     imported += 1
   }

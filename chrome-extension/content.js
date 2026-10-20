@@ -71,6 +71,7 @@ let loginAttempt = null
 let loginAttemptSequence = 0
 let lastPageState = ''
 let pageStateTimer = null
+let autofillSelection = null
 
 function reportPageState() {
   const state = {
@@ -186,7 +187,6 @@ function focusWithoutOpening(input) {
 }
 
 function showPicker(context, accounts) {
-  const { passwordInput, usernameInput } = context.fields
   const picker = document.createElement('div')
   picker.dataset.localpassPicker = '1'
   picker.setAttribute('role', 'group')
@@ -216,7 +216,9 @@ function showPicker(context, accounts) {
   accounts.forEach((account) => {
     const button = document.createElement('button')
     button.type = 'button'
-    button.textContent = account.username || account.displayName || '已保存的账号'
+    button.textContent =
+      [account.projectName || account.displayName, account.username].filter(Boolean).join(' · ') ||
+      '已保存的账号'
     button.style.cssText = [
       'display:block',
       'width:100%',
@@ -240,15 +242,7 @@ function showPicker(context, accounts) {
       if (!validContext(context)) return removePicker()
       // Close before firing framework input events. Those events can rerender
       // the form or synchronously focus another field.
-      removePicker()
-      filling = true
-      try {
-        setInputValue(usernameInput, account.username || '')
-        setInputValue(passwordInput, account.password || '')
-        if (editable(passwordInput)) passwordInput.focus({ preventScroll: true })
-      } finally {
-        filling = false
-      }
+      fillAccount(context, account)
     })
     picker.appendChild(button)
   })
@@ -256,6 +250,25 @@ function showPicker(context, accounts) {
   activePicker = { ...context, element: picker }
   document.body.appendChild(picker)
   positionPicker()
+}
+
+function fillAccount(context, account) {
+  if (!validContext(context)) return removePicker()
+  const { usernameInput, passwordInput } = context.fields
+  removePicker()
+  autofillSelection = {
+    token: account.selectionToken,
+    username: account.username || '',
+    url: location.href
+  }
+  filling = true
+  try {
+    setInputValue(usernameInput, account.username || '')
+    setInputValue(passwordInput, account.password || '')
+    if (editable(passwordInput)) passwordInput.focus({ preventScroll: true })
+  } finally {
+    filling = false
+  }
 }
 
 function requestAutofill(input) {
@@ -269,20 +282,23 @@ function requestAutofill(input) {
 
   try {
     chrome.runtime.sendMessage(
-      { type: 'LP_LOOKUP', identity: window.location.host },
+      { type: 'LP_LOOKUP', identity: window.location.host, ...collectSiteMetadata() },
       (response) => {
         const error = chrome.runtime.lastError
         if (context.sequence !== lookupSequence) return
         pendingLookup = null
         if (
           error ||
+          (context.blurred && !response?.selected) ||
           !response?.ok ||
           !response.accounts?.length ||
           document.activeElement !== input ||
           !validContext(context)
         )
           return
-        showPicker(context, response.accounts)
+        if (response.selected && response.accounts.length === 1)
+          fillAccount(context, response.accounts[0])
+        else showPicker(context, response.accounts)
       }
     )
   } catch {
@@ -331,6 +347,7 @@ function collectSiteMetadata() {
   return {
     site_name: siteName.slice(0, 160),
     page_title: pageTitle.slice(0, 256),
+    project_name: (siteName || pageTitle).slice(0, 256),
     site_url: window.location.origin,
     icon_url: iconUrl.slice(0, 2048),
     display_name: (siteName || pageTitle || window.location.host).slice(0, 256)
@@ -385,6 +402,11 @@ function tryCaptureLogin(event) {
       page_url: window.location.href,
       form_action: passwordInput.form?.action || window.location.href,
       ...collectSiteMetadata(),
+      selection_token:
+        autofillSelection?.url === location.href &&
+        autofillSelection.username === (fields.usernameInput?.value || '')
+          ? autofillSelection.token
+          : undefined,
       username: fields.usernameInput?.value || '',
       password: passwordInput.value
     }
@@ -450,7 +472,12 @@ document.addEventListener(
   },
   true
 )
-window.addEventListener('blur', removePicker)
+window.addEventListener('blur', () => {
+  // The desktop chooser takes focus. Retain only its pending request; ordinary
+  // late replies still stay dismissed, and page/user changes invalidate it.
+  if (pendingLookup) pendingLookup.blurred = true
+  else removePicker()
+})
 window.addEventListener('pagehide', removePicker)
 window.addEventListener('popstate', () => {
   removePicker()

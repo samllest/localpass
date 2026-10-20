@@ -32,6 +32,9 @@ export function normalizeSiteMetadata(value, identity) {
     page_title: String(value.page_title || '')
       .trim()
       .slice(0, 256),
+    project_name: String(value.project_name || '')
+      .trim()
+      .slice(0, 256),
     site_url: url && address && url.host === address.host ? url.origin : '',
     icon_data: safeIconData(value.icon_data)
   }
@@ -41,7 +44,14 @@ export function capturedSite(payload) {
   // page_url also recovers the port when a still-open tab runs an older extension.
   const url = websiteAddress(payload.page_url || payload.site_url || payload.identity)
   if (!url) throw new Error('Invalid website address')
-  const metadata = normalizeSiteMetadata({ ...payload, site_url: url.origin }, url.host)
+  const metadata = normalizeSiteMetadata(
+    {
+      ...payload,
+      project_name: payload.project_name || payload.site_name || payload.page_title || '',
+      site_url: url.origin
+    },
+    url.host
+  )
   return {
     identity: url.host,
     display_name:

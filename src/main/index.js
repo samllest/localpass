@@ -26,6 +26,7 @@ import { initBridgeServer, closeBridgeServer } from './bridge'
 import { initializeStorage } from './storage'
 import { acquireSingleInstance } from './single-instance'
 import { createCloseController, readClosePreference, clearClosePreference } from './close-behavior'
+import { chooseProjectAccount, cancelProjectChoices } from './project-choice'
 
 // 兼容从受限环境（注入了宿主 Electron 环境变量的会话）启动：
 // GPU 子进程派生会崩溃（0xC0000005），改为主进程内软件渲染，普通桌面环境无感知差异
@@ -104,7 +105,7 @@ function createWindow() {
   })
 
   const window = mainWindow
-  initBridgeServer(window.webContents).catch((error) => {
+  initBridgeServer(window.webContents, { chooseAccount: chooseProjectAccount }).catch((error) => {
     console.error('[Bridge] Unable to start browser connection:', error.code || error.message)
     if (window.isDestroyed()) return
     const detail =
@@ -233,6 +234,7 @@ app
       return true
     })
     ipcMain.handle('app:clearMasterKey', () => {
+      cancelProjectChoices()
       clearMasterKey()
       closeVault()
       currentUsername = null
@@ -267,6 +269,7 @@ app
   })
 
 app.on('before-quit', () => {
+  cancelProjectChoices()
   closeController.allowQuit()
   tray?.destroy()
   tray = null

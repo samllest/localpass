@@ -1,0 +1,121 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { isDevelopmentSite, matchProject, projectName } from '../src/shared/project-matching.js'
+import { resolveProjectLookup, resolveProjectCapture } from '../src/main/project-resolution.js'
+import { groupAccounts } from '../src/renderer/src/utils/vault.js'
+
+const site = { identity: 'localhost:3000', project_name: '项目 A' }
+const record = {
+  ...site,
+  app_id: 1,
+  category: 'web',
+  display_name: '项目 A',
+  username: 'admin',
+  password: 'synthetic-A'
+}
+const other = { ...record, app_id: 2, project_name: '项目 B', password: 'synthetic-B' }
+const noChoice = () => {
+  throw new Error('Unexpected selection prompt')
+}
+
+test('development hosts include loopback, private networks and local domains', () => {
+  for (const value of [
+    'localhost:3000',
+    '127.0.0.1:8080',
+    '[::1]:3000',
+    'demo.localhost:5173',
+    '192.168.3.1:80',
+    '10.0.15.50:8768',
+    '172.31.1.2:8080'
+  ])
+    assert.equal(isDevelopmentSite(value), true, value)
+  for (const value of [
+    'example.com:3000',
+    'localhost.evil.com',
+    '192.168.example.com',
+    '172.32.1.1'
+  ])
+    assert.equal(isDevelopmentSite(value), false, value)
+})
+
+test('project names use explicit name, site name, then title and normalize whitespace and case', () => {
+  assert.equal(projectName({ site_name: '项目 A', page_title: '登录' }), '项目 A')
+  assert.equal(matchProject([record, other], { ...site, project_name: ' 项目  A ' })[0], record)
+  assert.deepEqual(matchProject([record], { identity: site.identity }), [])
+  assert.deepEqual(matchProject([record], { ...site, project_name: '未知项目' }), [])
+})
+
+test('same host and port isolates projects for lookup, capture and vault grouping', async () => {
+  const result = await resolveProjectLookup([record, other], site, noChoice)
+  assert.deepEqual(result.accounts, [record])
+  assert.equal(
+    await resolveProjectCapture(
+      [other],
+      site,
+      { username: 'admin', password: 'synthetic-A' },
+      noChoice
+    ),
+    null
+  )
+  assert.equal(
+    await resolveProjectCapture(
+      [record, other],
+      site,
+      { username: 'admin', password: 'synthetic-A' },
+      noChoice
+    ),
+    record
+  )
+  assert.equal(groupAccounts([record, other]).length, 2)
+})
+
+test('same project names require an explicit account choice; cancellation releases no credentials', async () => {
+  const duplicate = { ...record, app_id: 3, username: 'other' }
+  let prompts = 0
+  const result = await resolveProjectLookup([record, other, duplicate], site, async (options) => {
+    prompts++
+    assert.equal(options.saving, false)
+    assert.deepEqual(options.accounts, [record, duplicate])
+    return 3
+  })
+  assert.equal(prompts, 1)
+  assert.deepEqual(result, { accounts: [duplicate], selected: true })
+  assert.deepEqual(
+    (await resolveProjectLookup([record, duplicate], site, async () => null)).accounts,
+    []
+  )
+})
+
+test('changed passwords ask before overwriting and can be saved separately; selected records bypass a second prompt', async () => {
+  const payload = { username: 'admin', password: 'changed-secret' }
+  assert.equal(await resolveProjectCapture([record], site, payload, async () => 'new'), null)
+  assert.equal(await resolveProjectCapture([record], site, payload, async () => null), false)
+  assert.equal(await resolveProjectCapture([record], site, payload, async () => 1), record)
+  assert.equal(await resolveProjectCapture([record], site, payload, noChoice, 1), record)
+  assert.equal(await resolveProjectCapture([record], site, payload, noChoice, 99), false)
+})
+
+test('missing names prompt for legacy records; public websites retain their existing account lookup', async () => {
+  let prompted = false
+  const result = await resolveProjectLookup(
+    [record, other],
+    { identity: site.identity },
+    async () => {
+      prompted = true
+      return 2
+    }
+  )
+  assert.equal(prompted, true)
+  assert.deepEqual(result.accounts, [other])
+  const legacy = {
+    app_id: 4,
+    identity: site.identity,
+    display_name: site.identity,
+    username: 'admin'
+  }
+  assert.deepEqual((await resolveProjectLookup([legacy], site, async () => 4)).accounts, [legacy])
+  assert.deepEqual(
+    (await resolveProjectLookup([record, other], { identity: 'example.com' }, noChoice)).accounts,
+    [record, other]
+  )
+})

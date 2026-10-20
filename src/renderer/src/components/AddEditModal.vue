@@ -60,6 +60,18 @@
           />
         </div>
       </div>
+      <div v-if="developmentSite" class="form-row">
+        <label for="account-project">项目名称</label>
+        <input
+          id="account-project"
+          v-model="form.project_name"
+          type="text"
+          maxlength="256"
+          placeholder="与网页的网站名称或标签页标题一致"
+          :disabled="saving"
+        />
+        <p class="field-hint">同一地址和端口按项目名称区分；名称仍相同时，填充前会让你选择账号。</p>
+      </div>
       <div class="form-row">
         <label for="account-username">用户名</label
         ><input
@@ -131,6 +143,7 @@ import SiteAvatar from './SiteAvatar.vue'
 import VaultDialog from './VaultDialog.vue'
 import { generatePassword, passwordStrength, recordId, websiteUrl } from '../utils/vault'
 import { websiteAddress, normalizeSiteMetadata } from '../../../shared/site-metadata'
+import { isDevelopmentSite, projectName } from '../../../shared/project-matching'
 
 const props = defineProps({ editing: Object, defaults: Object })
 const emit = defineEmits(['close', 'saved'])
@@ -142,6 +155,7 @@ const form = ref({
   identity: initialUrl ? `${initialUrl.protocol}//${initialUrl.hostname}` : initial.identity || '',
   port: initialUrl?.port || '',
   category: initial.category || 'web',
+  project_name: projectName(initial),
   username: props.editing?.username || '',
   password: ''
 })
@@ -149,6 +163,9 @@ const showPassword = ref(false)
 const saving = ref(false)
 const error = ref('')
 const generated = ref(false)
+const developmentSite = computed(
+  () => form.value.category === 'web' && isDevelopmentSite(form.value.identity)
+)
 const strength = computed(() => passwordStrength(form.value.password))
 function hidePassword() {
   showPassword.value = false
@@ -200,7 +217,8 @@ async function submit() {
     identity,
     category: form.value.category,
     username: form.value.username.trim(),
-    site_url: siteUrl
+    site_url: siteUrl,
+    project_name: developmentSite.value ? form.value.project_name.trim() || display_name : ''
   }
   if (form.value.password) payload.password = form.value.password
   saving.value = true

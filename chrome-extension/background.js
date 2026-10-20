@@ -141,16 +141,19 @@ async function sendCapture(tabId, capture) {
   }
 }
 
-async function lookupAccounts(identity) {
+async function lookupAccounts(identity, metadata = {}) {
   const url = new URL('http://127.0.0.1:35320/lookup')
   url.searchParams.set('identity', identity)
+  for (const key of ['site_name', 'page_title', 'project_name']) {
+    if (metadata[key]) url.searchParams.set(key, String(metadata[key]).slice(0, 256))
+  }
 
   const response = await fetch(url)
   const data = await response.json()
   if (!response.ok || !data.ok) {
     throw new Error(data.error || 'LocalPass lookup failed')
   }
-  return data.accounts || []
+  return { accounts: data.accounts || [], selected: Boolean(data.selected) }
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -162,8 +165,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } catch {
       /* Use the supplied identity. */
     }
-    lookupAccounts(identity)
-      .then((accounts) => sendResponse({ ok: true, accounts }))
+    lookupAccounts(identity, message)
+      .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message, accounts: [] }))
     return true
   }

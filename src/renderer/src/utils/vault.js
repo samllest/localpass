@@ -1,4 +1,5 @@
 import { websiteAddress, normalizeSiteMetadata } from '../../../shared/site-metadata.js'
+import { isDevelopmentSite, projectKey } from '../../../shared/project-matching.js'
 
 const collator = new Intl.Collator('zh-CN', { sensitivity: 'base', numeric: true })
 
@@ -7,7 +8,10 @@ export function recordId(record) {
 }
 
 export function groupKey(record) {
-  return `${record.category || 'web'}:${record.identity || record.display_name}`
+  const key = `${record.category || 'web'}:${record.identity || record.display_name}`
+  return record.category !== 'app' && isDevelopmentSite(record.identity)
+    ? `${key}:project:${JSON.stringify(projectKey(record))}`
+    : key
 }
 
 export function groupAccounts(records) {
@@ -39,6 +43,7 @@ export function filterGroups(groups, query, category = 'all', sort = 'name') {
           group.display_name,
           group.site_name,
           group.page_title,
+          group.project_name,
           group.identity,
           ...group.accounts.map((account) => account.username)
         ].some((value) =>
