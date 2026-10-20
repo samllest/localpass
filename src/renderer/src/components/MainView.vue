@@ -403,6 +403,8 @@
                   </button>
                 </div>
               </section>
+              <h2 class="section-title">版本与更新</h2>
+              <AppUpdate settings />
               <p class="page-footnote"><UiIcon name="shield" />LocalPass · 本地加密密码管理器</p>
             </template>
           </div>
@@ -463,6 +465,7 @@ import SiteAddress from './SiteAddress.vue'
 import AddEditModal from './AddEditModal.vue'
 import PasswordDetails from './PasswordDetails.vue'
 import VaultDialog from './VaultDialog.vue'
+import AppUpdate from './AppUpdate.vue'
 import { checkPasswords, filterGroups, groupAccounts, groupKey, recordId } from '../utils/vault'
 
 const navigation = [

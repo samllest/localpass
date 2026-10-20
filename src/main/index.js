@@ -27,6 +27,8 @@ import { initializeStorage } from './storage'
 import { acquireSingleInstance } from './single-instance'
 import { createCloseController, readClosePreference, clearClosePreference } from './close-behavior'
 import { chooseProjectAccount, cancelProjectChoices } from './project-choice'
+import { autoUpdater } from 'electron-updater'
+import { createUpdateManager } from './updates'
 
 // 兼容从受限环境（注入了宿主 Electron 环境变量的会话）启动：
 // GPU 子进程派生会崩溃（0xC0000005），改为主进程内软件渲染，普通桌面环境无感知差异
@@ -39,6 +41,9 @@ let clipboardClearTimer = null
 let currentUsername = null
 const hasInstanceLock = acquireSingleInstance(app, () => mainWindow)
 let tray = null
+let updates
+let updateCheckTimer
+let updateStartupTimer
 const closePreferenceFile = join(app.getPath('userData'), 'close-preference.json')
 const closeController = createCloseController({
   app,
@@ -136,6 +141,42 @@ app
     if (!hasInstanceLock) return
     await initializeStorage()
     initSystemDb()
+
+    updates = createUpdateManager({
+      updater: autoUpdater,
+      version: app.getVersion(),
+      supported: app.isPackaged && process.platform === 'win32',
+      settingsFile: join(app.getPath('userData'), 'update-settings.json'),
+      notify: (state) => {
+        if (mainWindow && !mainWindow.isDestroyed())
+          mainWindow.webContents.send('updates:changed', state)
+      },
+      install: async () => {
+        showMainWindow()
+        const result = await dialog.showMessageBox(mainWindow, {
+          type: 'question',
+          title: '安装 LocalPass 更新',
+          message: '现在重启并安装更新？',
+          detail: '安装期间浏览器保存与填充会暂停，现有本地密码库会保留。',
+          buttons: ['取消', '重启并安装'],
+          defaultId: 1,
+          cancelId: 0,
+          noLink: true
+        })
+        if (result.response !== 1) return
+        // before-quit allows the installer to exit without the normal close-to-tray prompt.
+        autoUpdater.quitAndInstall(false, true)
+      }
+    })
+    ipcMain.handle('updates:state', () => updates.snapshot())
+    ipcMain.handle('updates:check', () => updates.check())
+    ipcMain.handle('updates:download', () => updates.download())
+    ipcMain.handle('updates:install', () => updates.install())
+    ipcMain.handle('updates:setServer', (_event, url) => updates.setServer(url))
+    if (app.isPackaged && process.platform === 'win32') {
+      updateStartupTimer = setTimeout(() => void updates.check(), 8000)
+      updateCheckTimer = setInterval(() => void updates.check(), 4 * 60 * 60 * 1000)
+    }
 
     electronApp.setAppUserModelId('com.electron')
     app.on('browser-window-created', (_, window) => {
@@ -269,6 +310,8 @@ app
   })
 
 app.on('before-quit', () => {
+  clearTimeout(updateStartupTimer)
+  clearInterval(updateCheckTimer)
   cancelProjectChoices()
   closeController.allowQuit()
   tray?.destroy()

@@ -168,6 +168,51 @@ if (process.versions.electron) {
           )
           assert.ok(ui.text.includes('恢复关闭提示'))
           assert.equal(ui.overflow, false)
+          const updateState = await testWindow.webContents.executeJavaScript(
+            'window.localpass.getUpdateState()'
+          )
+          assert.ok(ui.text.includes('版本与更新'))
+          assert.equal(updateState.status, 'unsupported')
+          assert.equal(
+            (await testWindow.webContents.executeJavaScript('window.localpass.checkForUpdates()'))
+              .status,
+            'unsupported'
+          )
+          // Use synthetic release events to verify the real preload subscription and UI.
+          for (const [status, percent, label] of [
+            ['available', 0, '下载更新'],
+            ['downloading', 42, '42%'],
+            ['downloaded', 100, '重启并安装']
+          ]) {
+            testWindow.webContents.send('updates:changed', {
+              ...updateState,
+              status,
+              percent,
+              version: '9.9.9-fixture'
+            })
+            await pause()
+            assert.ok(
+              await testWindow.webContents.executeJavaScript(
+                `document.querySelector('[aria-label="应用更新"]').innerText.includes(${JSON.stringify(label)})`
+              )
+            )
+          }
+          if (process.env.LOCALPASS_UPDATE_SCREENSHOT) {
+            testWindow.webContents.setBackgroundThrottling(false)
+            BrowserWindow.prototype.show.call(testWindow)
+            await testWindow.webContents.executeJavaScript(
+              `document.querySelectorAll('[aria-label="应用更新"]')[1].scrollIntoView({block:'end'})`
+            )
+            await pause()
+            fs.writeFileSync(
+              process.env.LOCALPASS_UPDATE_SCREENSHOT,
+              (await testWindow.capturePage()).toPNG()
+            )
+            BrowserWindow.prototype.hide.call(testWindow)
+          }
+          console.log(
+            'PASS update settings IPC, development guard, progress and restart/install UI'
+          )
           closeAnswer = { response: 0, checkboxChecked: false }
           testWindow.close()
           await pause()

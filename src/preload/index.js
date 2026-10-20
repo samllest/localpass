@@ -9,6 +9,16 @@ const api = {
   close: () => ipcRenderer.send('window:close'),
   getClosePreference: () => ipcRenderer.invoke('window:closePreference'),
   resetClosePreference: () => ipcRenderer.invoke('window:resetClosePreference'),
+  getUpdateState: () => ipcRenderer.invoke('updates:state'),
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  downloadUpdate: () => ipcRenderer.invoke('updates:download'),
+  installUpdate: () => ipcRenderer.invoke('updates:install'),
+  setUpdateServer: (url) => ipcRenderer.invoke('updates:setServer', url),
+  onUpdateState: (callback) => {
+    const listener = (_event, state) => callback(state)
+    ipcRenderer.on('updates:changed', listener)
+    return () => ipcRenderer.removeListener('updates:changed', listener)
+  },
 
   // Authentication
   register: (username, password) => ipcRenderer.invoke('auth:register', username, password),

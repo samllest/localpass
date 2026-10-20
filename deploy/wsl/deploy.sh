@@ -10,6 +10,15 @@ docker info >/dev/null
 release="$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$deploy_dir/releases/$release"
 cp -a "$bundle/." "$deploy_dir/releases/$release/"
+# Keep immutable installers available for clients that checked before this release.
+if test -d "$deploy_dir/site"; then
+  while IFS= read -r -d '' artifact; do
+    name="$(basename -- "$artifact")"
+    if ! test -e "$deploy_dir/releases/$release/$name"; then
+      ln -- "$artifact" "$deploy_dir/releases/$release/$name"
+    fi
+  done < <(find -L "$deploy_dir/site" -maxdepth 1 -type f \( -name '*.exe' -o -name '*.blockmap' \) -print0)
+fi
 cp "$script_dir/compose.yaml" "$script_dir/nginx.conf" "$deploy_dir/"
 ln -sfn "releases/$release" "$deploy_dir/site"
 docker compose -f "$deploy_dir/compose.yaml" up -d --force-recreate

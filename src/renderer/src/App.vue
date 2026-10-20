@@ -21,6 +21,8 @@
       </div>
     </div>
 
+    <AppUpdate />
+
     <!-- 解锁页 -->
     <UnlockScreen v-if="!unlocked" @unlocked="onUnlocked" />
 
@@ -30,10 +32,18 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import UiIcon from './components/UiIcon.vue'
 import UnlockScreen from './components/UnlockScreen.vue'
 import MainView from './components/MainView.vue'
+import AppUpdate from './components/AppUpdate.vue'
+import { initializeUpdates } from './utils/updates'
+
+let stopUpdates
+onMounted(async () => {
+  stopUpdates = await initializeUpdates()
+})
+onBeforeUnmount(() => stopUpdates?.())
 
 const savedTheme = localStorage.getItem('localpass-theme') || 'light'
 document.documentElement.dataset.theme =
