@@ -7,6 +7,7 @@ import { projectName } from '../shared/project-matching.js'
 
 const windows = new Set()
 let queue = Promise.resolve()
+const mainDirectory = fileURLToPath(new URL('.', import.meta.url))
 
 const escape = (value) =>
   String(value ?? '').replace(
@@ -92,6 +93,7 @@ export function chooseProjectAccount(options, isValid = () => true) {
         frame: false,
         minWidth: 420,
         minHeight: 400,
+        icon: join(mainDirectory, '../../build/icon.png'),
         title: 'LocalPass · 选择项目账号',
         show: true,
         alwaysOnTop: true,

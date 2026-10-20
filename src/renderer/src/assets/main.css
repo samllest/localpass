@@ -1719,12 +1719,10 @@ input[type='checkbox'] {
   height: 52px;
   margin: 0 auto 16px;
   border-radius: 15px;
-  background: var(--accent);
-  color: white;
 }
 .unlock-logo-icon {
-  width: 28px;
-  height: 28px;
+  width: 52px;
+  height: 52px;
 }
 .unlock-title {
   font-size: 22px;

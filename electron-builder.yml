@@ -17,13 +17,20 @@ extraResources:
     filter:
       - '*.js'
       - manifest.json
+      - icons/icon-16.png
+      - icons/icon-32.png
+      - icons/icon-48.png
+      - icons/icon-128.png
 asarUnpack:
   - resources/**
 win:
   executableName: localpass
-  signAndEditExecutable: false
+  icon: build/icon.ico
+  signAndEditExecutable: true
 nsis:
   include: build/installer.nsh
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
   runAfterFinish: true
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

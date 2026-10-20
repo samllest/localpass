@@ -6,25 +6,13 @@
       </button>
       <span class="detail-kind">{{ group.category === 'app' ? '应用密码' : '网站密码' }}</span>
       <div class="detail-top-actions">
-        <button
-          v-if="group.accounts.length === 1"
-          class="button button-secondary"
-          @click="accountAction('edit', group.accounts[0])"
-        >
-          <UiIcon name="edit" />编辑
-        </button>
-        <button v-else class="button button-secondary" @click="$emit('add')">
+        <button class="button button-secondary" @click="$emit('add')">
           <UiIcon name="plus-white" />添加账号
         </button>
-        <details ref="actionsMenu" class="detail-menu">
+        <details v-if="group.accounts.length === 1" ref="actionsMenu" class="detail-menu">
           <summary class="icon-button" aria-label="更多操作"><UiIcon name="more" /></summary>
           <div class="detail-menu-items">
-            <button @click="menuAction('add')"><UiIcon name="plus-white" />添加账号</button
-            ><button
-              v-if="group.accounts.length === 1"
-              class="danger-text"
-              @click="menuAction('delete', group.accounts[0])"
-            >
+            <button class="danger-text" @click="menuAction('delete', group.accounts[0])">
               <UiIcon name="trash" />删除
             </button>
           </div>
@@ -58,11 +46,15 @@
         :key="recordId(account)"
         class="account-section"
       >
-        <header v-if="group.accounts.length > 1" class="multi-account-heading">
-          <h3>账号 {{ index + 1 }}</h3>
+        <header class="multi-account-heading">
+          <h3 v-if="group.accounts.length > 1">账号 {{ index + 1 }}</h3>
           <div>
             <button class="text-button" @click="accountAction('edit', account)">编辑</button
-            ><button class="text-button danger-text" @click="accountAction('delete', account)">
+            ><button
+              v-if="group.accounts.length > 1"
+              class="text-button danger-text"
+              @click="accountAction('delete', account)"
+            >
               删除
             </button>
           </div>

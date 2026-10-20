@@ -6,6 +6,18 @@ const path = require('node:path')
 const os = require('node:os')
 const assert = require('node:assert/strict')
 
+const manifest = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../chrome-extension/manifest.json'), 'utf8')
+)
+assert.match(manifest.version, /^\d+\.\d+\.\d+$/)
+for (const [size, icon] of Object.entries(manifest.icons)) {
+  const image = fs.readFileSync(path.join(__dirname, '../chrome-extension', icon))
+  assert.equal(image.toString('ascii', 1, 4), 'PNG')
+  assert.equal(image.readUInt32BE(16), Number(size))
+  assert.equal(image.readUInt32BE(20), Number(size))
+}
+console.log('PASS extension manifest uses the generated LocalPass PNG icons at every declared size')
+
 if (!process.versions.electron) {
   const { spawnSync } = require('node:child_process')
   const env = { ...process.env }
