@@ -1,12 +1,24 @@
-import { app, shell, BrowserWindow, ipcMain, clipboard, Tray, Menu, nativeImage } from 'electron'
+import {
+  app,
+  shell,
+  BrowserWindow,
+  ipcMain,
+  clipboard,
+  Tray,
+  Menu,
+  nativeImage,
+  safeStorage
+} from 'electron'
 import { join } from 'path'
-import { readFile, writeFile } from 'fs/promises'
+import { readFile, stat, writeFile } from 'fs/promises'
 import { dialog } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
-import { initSystemDb, registerUser, loginUser, closeSystemDb } from './auth'
+import { initSystemDb, registerUser, loginUser, closeSystemDb, getUpdateAccount } from './auth'
 import {
   initDB,
+  copyVaultKey,
+  restoreVaultKey,
   getVaultInfo,
   listApps,
   searchApps,
@@ -30,6 +42,8 @@ import { createCloseController, readClosePreference, clearClosePreference } from
 import { chooseProjectAccount, cancelProjectChoices } from './project-choice'
 import { autoUpdater } from 'electron-updater'
 import { createUpdateManager } from './updates'
+import { createExtensionUpdateManager } from './extension-updates'
+import { createUpdateSession } from './update-session'
 
 // 兼容从受限环境（注入了宿主 Electron 环境变量的会话）启动：
 // GPU 子进程派生会崩溃（0xC0000005），改为主进程内软件渲染，普通桌面环境无感知差异
@@ -41,11 +55,15 @@ isolateBrowserSession()
 let mainWindow
 let clipboardClearTimer = null
 let currentUsername = null
+let updateSession
+let installingUpdate = false
 const hasInstanceLock = acquireSingleInstance(app, () => mainWindow)
 let tray = null
 let updates
 let updateCheckTimer
 let updateStartupTimer
+let extensionUpdates
+let extensionUpdateTimer
 const closePreferenceFile = join(app.getPath('userData'), 'close-preference.json')
 const closeController = createCloseController({
   app,
@@ -112,7 +130,10 @@ function createWindow() {
   })
 
   const window = mainWindow
-  initBridgeServer(window.webContents, { chooseAccount: chooseProjectAccount }).catch((error) => {
+  initBridgeServer(window.webContents, {
+    chooseAccount: chooseProjectAccount,
+    extensionStatus: (version) => extensionUpdates?.reportBrowserVersion(version)
+  }).catch((error) => {
     console.error('[Bridge] Unable to start browser connection:', error.code || error.message)
     if (window.isDestroyed()) return
     const detail =
@@ -143,6 +164,28 @@ app
     if (!hasInstanceLock) return
     await initializeStorage()
     initSystemDb()
+    updateSession = createUpdateSession({ folder: app.getPath('userData'), safeStorage })
+    const restored = updateSession.restore(
+      (account) =>
+        account && getUpdateAccount(account.username)?.fingerprint === account.fingerprint,
+      (account, key) => {
+        try {
+          initDB(account.dbFilename)
+          restoreVaultKey(key)
+        } catch (error) {
+          closeVault()
+          throw error
+        }
+      }
+    )
+    currentUsername = restored?.username || null
+    ipcMain.handle('auth:session', () => ({ unlocked: isVaultUnlocked() }))
+
+    function rememberUpdateSession() {
+      if (isVaultUnlocked() && currentUsername) {
+        updateSession.remember(getUpdateAccount(currentUsername), copyVaultKey())
+      }
+    }
 
     updates = createUpdateManager({
       updater: autoUpdater,
@@ -168,7 +211,14 @@ app
         if (result.response !== 1) return
         await createStorageSnapshot()
         // before-quit allows the installer to exit without the normal close-to-tray prompt.
-        autoUpdater.quitAndInstall(false, true)
+        installingUpdate = updateSession.prepare()
+        try {
+          autoUpdater.quitAndInstall(false, true)
+        } catch (error) {
+          installingUpdate = false
+          rememberUpdateSession()
+          throw error
+        }
       }
     })
     ipcMain.handle('updates:state', () => updates.snapshot())
@@ -176,9 +226,35 @@ app
     ipcMain.handle('updates:download', () => updates.download())
     ipcMain.handle('updates:install', () => updates.install())
     ipcMain.handle('updates:setServer', (_event, url) => updates.setServer(url))
+    extensionUpdates = createExtensionUpdateManager({
+      sourceFolder: app.isPackaged
+        ? join(process.resourcesPath, 'chrome-extension')
+        : join(app.getAppPath(), 'chrome-extension'),
+      dataFolder: app.isPackaged
+        ? app.getPath('userData')
+        : join(app.getAppPath(), '.localpass-data'),
+      serverUrl: () => updates.snapshot().serverUrl
+    })
+    await extensionUpdates.initialize().catch((error) => {
+      console.error('[Extension] Unable to prepare auto-update directory:', error.message)
+    })
+    ipcMain.handle('extension:state', () => extensionUpdates.snapshot())
+    ipcMain.handle('extension:check', () => extensionUpdates.check())
+    ipcMain.handle('extension:bind', async () => {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: '选择浏览器当前加载的 LocalPass 扩展目录',
+        properties: ['openDirectory']
+      })
+      if (result.canceled) return { ...extensionUpdates.snapshot(), cancelled: true }
+      return extensionUpdates.bind(result.filePaths[0])
+    })
     if (app.isPackaged && process.platform === 'win32') {
-      updateStartupTimer = setTimeout(() => void updates.check(), 8000)
+      updateStartupTimer = setTimeout(() => {
+        void updates.check()
+        void extensionUpdates.check()
+      }, 8000)
       updateCheckTimer = setInterval(() => void updates.check(), 4 * 60 * 60 * 1000)
+      extensionUpdateTimer = setInterval(() => void extensionUpdates.check(), 15 * 60 * 1000)
     }
 
     electronApp.setAppUserModelId('com.electron')
@@ -196,7 +272,10 @@ app
           throw error
         }
       })
-      if (res.success) currentUsername = res.username
+      if (res.success) {
+        currentUsername = res.username
+        rememberUpdateSession()
+      }
       return res
     })
 
@@ -207,6 +286,7 @@ app
           initDB(res.dbFilename)
           setMasterPassword(password, res.salt)
           currentUsername = res.username
+          rememberUpdateSession()
         } catch (error) {
           closeVault()
           currentUsername = null
@@ -228,32 +308,42 @@ app
       shell.showItemInFolder(getVaultInfo().dbPath)
     })
     ipcMain.handle('extension:openFolder', async () => {
-      const folder = app.isPackaged
-        ? join(process.resourcesPath, 'chrome-extension')
-        : join(app.getAppPath(), 'chrome-extension')
+      const folder = extensionUpdates.snapshot().folder
       const error = await shell.openPath(folder)
       if (error) throw new Error('无法打开扩展目录：' + error)
     })
     ipcMain.handle('window:closePreference', () => readClosePreference(closePreferenceFile))
     ipcMain.handle('window:resetClosePreference', () => clearClosePreference(closePreferenceFile))
-    ipcMain.handle('vault:export', async () => {
+    ipcMain.handle('vault:export', async (_, passphrase) => {
       const result = await dialog.showSaveDialog(mainWindow, {
-        title: '导出加密密码库',
-        defaultPath: 'localpass-backup.localpass',
-        filters: [{ name: 'LocalPass 加密备份', extensions: ['localpass'] }]
+        title: '导出加密密码备份',
+        defaultPath: 'localpass-backup.json',
+        filters: [
+          { name: 'LocalPass 加密 JSON', extensions: ['json'] },
+          { name: 'LocalPass 备份', extensions: ['localpass'] }
+        ]
       })
       if (result.canceled || !result.filePath) return { canceled: true }
-      await writeFile(result.filePath, exportVaultData(), 'utf8')
+      await writeFile(result.filePath, exportVaultData(passphrase), {
+        encoding: 'utf8',
+        mode: 0o600
+      })
       return { canceled: false, filePath: result.filePath }
     })
-    ipcMain.handle('vault:import', async () => {
+    ipcMain.handle('vault:selectImport', async () => {
       const result = await dialog.showOpenDialog(mainWindow, {
         title: '导入加密密码库',
         properties: ['openFile'],
         filters: [{ name: 'LocalPass 加密备份', extensions: ['localpass', 'json'] }]
       })
       if (result.canceled || !result.filePaths[0]) return { canceled: true }
-      const imported = importVaultData(await readFile(result.filePaths[0], 'utf8'))
+      const fileInfo = await stat(result.filePaths[0])
+      if (fileInfo.size > 50 * 1024 * 1024) throw new Error('备份文件过大，无法导入')
+      const serialized = await readFile(result.filePaths[0], 'utf8')
+      return { canceled: false, serialized }
+    })
+    ipcMain.handle('vault:import', (_, serialized, passphrase) => {
+      const imported = importVaultData(serialized, passphrase)
       mainWindow?.webContents.send('app:refreshList')
       return { canceled: false, imported }
     })
@@ -276,6 +366,7 @@ app
       return true
     })
     ipcMain.handle('app:clearMasterKey', () => {
+      updateSession.clear()
       cancelProjectChoices()
       clearMasterKey()
       closeVault()
@@ -311,8 +402,10 @@ app
   })
 
 app.on('before-quit', () => {
+  if (!installingUpdate && !updateSession?.pending()) updateSession?.clear()
   clearTimeout(updateStartupTimer)
   clearInterval(updateCheckTimer)
+  clearInterval(extensionUpdateTimer)
   cancelProjectChoices()
   closeController.allowQuit()
   tray?.destroy()

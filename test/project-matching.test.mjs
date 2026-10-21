@@ -69,21 +69,10 @@ test('same host and port isolates projects for lookup, capture and vault groupin
   assert.equal(groupAccounts([record, other]).length, 2)
 })
 
-test('same project names require an explicit account choice; cancellation releases no credentials', async () => {
+test('multiple accounts in the same project return to the browser picker without a desktop prompt', async () => {
   const duplicate = { ...record, app_id: 3, username: 'other' }
-  let prompts = 0
-  const result = await resolveProjectLookup([record, other, duplicate], site, async (options) => {
-    prompts++
-    assert.equal(options.saving, false)
-    assert.deepEqual(options.accounts, [record, duplicate])
-    return 3
-  })
-  assert.equal(prompts, 1)
-  assert.deepEqual(result, { accounts: [duplicate], selected: true })
-  assert.deepEqual(
-    (await resolveProjectLookup([record, duplicate], site, async () => null)).accounts,
-    []
-  )
+  const result = await resolveProjectLookup([record, other, duplicate], site, noChoice)
+  assert.deepEqual(result, { accounts: [record, duplicate], selected: false })
 })
 
 test('changed passwords ask before overwriting and can be saved separately; selected records bypass a second prompt', async () => {
@@ -95,25 +84,16 @@ test('changed passwords ask before overwriting and can be saved separately; sele
   assert.equal(await resolveProjectCapture([record], site, payload, noChoice, 99), false)
 })
 
-test('missing names prompt for legacy records; public websites retain their existing account lookup', async () => {
-  let prompted = false
-  const result = await resolveProjectLookup(
-    [record, other],
-    { identity: site.identity },
-    async () => {
-      prompted = true
-      return 2
-    }
-  )
-  assert.equal(prompted, true)
-  assert.deepEqual(result.accounts, [other])
+test('missing names and legacy records also use the browser picker; public website lookup is unchanged', async () => {
+  const result = await resolveProjectLookup([record, other], { identity: site.identity }, noChoice)
+  assert.deepEqual(result.accounts, [record, other])
   const legacy = {
     app_id: 4,
     identity: site.identity,
     display_name: site.identity,
     username: 'admin'
   }
-  assert.deepEqual((await resolveProjectLookup([legacy], site, async () => 4)).accounts, [legacy])
+  assert.deepEqual((await resolveProjectLookup([legacy], site, noChoice)).accounts, [legacy])
   assert.deepEqual(
     (await resolveProjectLookup([record, other], { identity: 'example.com' }, noChoice)).accounts,
     [record, other]

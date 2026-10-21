@@ -323,9 +323,7 @@
   <body>
     <header>
       <a class="brand" href="./"
-        ><span class="logo"
-          ><img src="icon.svg" width="40" height="40" alt="" /></span
-        >LocalPass</a
+        ><span class="logo"><img src="icon.svg" width="40" height="40" alt="" /></span>LocalPass</a
       ><span class="release">v__VERSION__ · Windows</span>
     </header>
     <main>
@@ -346,7 +344,9 @@
             >桌面端 · WINDOWS X64
           </div>
           <h2>安装 LocalPass</h2>
-          <p>管理账号、查看密码历史与备份。支持在应用内检查、下载更新，安装包也附带浏览器扩展文件。</p>
+          <p>
+            管理账号、查看密码历史与备份。支持在应用内检查、下载更新，安装包也附带浏览器扩展文件。
+          </p>
           <a class="button" href="localpass-__VERSION__-setup.exe" download
             >下载 Windows 安装包 <span aria-hidden="true">↓</span></a
           ><span class="file-meta"
@@ -379,9 +379,9 @@
             <span class="step-number">2</span>
             <h3>加载浏览器扩展</h3>
             <p>
-              解压扩展 ZIP。Chrome 打开 <code>chrome://extensions/</code>，Edge 打开
-              <code>edge://extensions/</code>。开启开发者模式，加载解压后的
-              <code>chrome-extension</code> 文件夹。
+              在桌面端设置点击「打开扩展目录」。Chrome 打开 <code>chrome://extensions/</code>，Edge
+              打开
+              <code>edge://extensions/</code>。开启开发者模式，加载刚打开的文件夹即可启用自动更新。
             </p>
           </li>
           <li>
@@ -399,7 +399,9 @@
           </svg>
           <p>
             <strong>每台电脑，独立保存。</strong
-            >此页面只分发安装文件，密码保存在使用者自己的设备上。旧版本首次请下载新安装包覆盖安装，之后可在「设置 → 版本与更新」下载更新。更新插件后，请重新加载扩展并刷新网站。
+            >此页面只分发安装文件，密码保存在使用者自己的设备上。旧版首次升级到桌面端 1.4.6
+            后，请在设置绑定当前扩展目录，手动重新加载一次并确认新增权限；此后扩展会从内网自动更新。扩展
+            1.3.7 起会自动接管已打开的网页，保留已输入内容。
           </p>
         </aside>
       </section>

@@ -23,9 +23,29 @@ if (process.versions.electron) {
         await assert.rejects(bridge.initBridgeServer(null, { port }), { code: 'EADDRINUSE' })
         console.log('PASS an occupied port rejects safely without an uncaught exception')
         await new Promise((resolve) => occupied.close(resolve))
-        const startup = bridge.initBridgeServer(null, { port })
+        const startup = bridge.initBridgeServer(null, {
+          port,
+          extensionStatus: (version) => ({ ok: true, version: '1.3.7', reported: version })
+        })
         assert.equal(bridge.initBridgeServer(null, { port }), startup)
         await startup
+        const extensionState = await fetch(
+          `http://127.0.0.1:${port}/extension-status?version=1.3.5`
+        )
+        const metadata = await extensionState.json()
+        assert.equal(typeof metadata.instanceId, 'string')
+        assert.equal(metadata.unlocked, false)
+        delete metadata.instanceId
+        delete metadata.unlocked
+        assert.deepEqual(metadata, {
+          ok: true,
+          version: '1.3.7',
+          reported: '1.3.5'
+        })
+        assert.equal(extensionState.headers.get('cache-control'), 'no-store')
+        console.log(
+          'PASS extension version checks work while locked without retrieving credentials'
+        )
         const response = await fetch(`http://127.0.0.1:${port}/lookup?identity=fixture.example`)
         assert.equal(response.status, 423)
         assert.deepEqual((await response.json()).accounts, [])
@@ -168,6 +188,32 @@ if (process.versions.electron) {
           )
           assert.ok(ui.text.includes('恢复关闭提示'))
           assert.equal(ui.overflow, false)
+          const extensionState = await testWindow.webContents.executeJavaScript(
+            'window.localpass.getExtensionUpdateState()'
+          )
+          assert.equal(extensionState.version, '1.3.7')
+          assert.ok(ui.text.includes('绑定已有扩展目录'))
+          assert.ok(ui.text.includes('每 15 分钟自动下载新版'))
+          assert.ok(fs.existsSync(path.join(extensionState.folder, 'manifest.json')))
+          testWindow.webContents.setBackgroundThrottling(false)
+          BrowserWindow.prototype.showInactive.call(testWindow)
+          await testWindow.webContents.executeJavaScript(
+            `document.querySelector('[aria-label="浏览器扩展与自动更新"]').scrollIntoView({block:'center'})`
+          )
+          await pause()
+          const extensionScreenshot = path.join(
+            process.env.LOCALPASS_STARTUP_PROFILE,
+            'extension-update-settings.png'
+          )
+          fs.writeFileSync(
+            extensionScreenshot,
+            (await testWindow.webContents.capturePage()).toPNG()
+          )
+          BrowserWindow.prototype.hide.call(testWindow)
+          console.log(`Extension settings screenshot: ${extensionScreenshot}`)
+          console.log(
+            'PASS extension update settings use a stable directory through the real preload and renderer'
+          )
           const updateState = await testWindow.webContents.executeJavaScript(
             'window.localpass.getUpdateState()'
           )
@@ -242,6 +288,9 @@ if (process.versions.electron) {
   ])
     delete env[key]
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'localpass-startup-test-'))
+  fs.cpSync(path.join(__dirname, '../chrome-extension'), path.join(profile, 'chrome-extension'), {
+    recursive: true
+  })
   env.LOCALPASS_STARTUP_PROFILE = profile
   const bridgeCheck = spawnSync(electron, [__filename], {
     env: { ...env, LOCALPASS_STARTUP_MODE: 'bridge' },

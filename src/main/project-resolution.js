@@ -1,20 +1,13 @@
 import { isDevelopmentSite, matchProject, projectName } from '../shared/project-matching.js'
 
-export async function resolveProjectLookup(records, site, choose) {
+export async function resolveProjectLookup(records, site) {
   if (!isDevelopmentSite(site.identity)) return { accounts: records, selected: false }
   const matches = matchProject(records, site)
-  // Older extensions and legacy unnamed records require an explicit choice.
+  // Keep project isolation, but let the browser picker handle every account
+  // choice. Merely focusing a login field must never open a desktop window.
   const candidates = matches.length ? matches : records.filter((row) => !projectName(row))
   const accounts = !projectName(site) ? records : candidates
-  if (matches.length === 1) return { accounts: matches, selected: false }
-  if (!accounts.length) return { accounts: [], selected: false }
-  const id = await choose({
-    identity: site.identity,
-    project: projectName(site),
-    accounts,
-    saving: false
-  })
-  return { accounts: accounts.filter((row) => row.app_id === id), selected: id != null }
+  return { accounts, selected: false }
 }
 
 export async function resolveProjectCapture(records, site, payload, choose, selectedId) {

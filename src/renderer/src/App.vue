@@ -24,10 +24,10 @@
     <AppUpdate />
 
     <!-- 解锁页 -->
-    <UnlockScreen v-if="!unlocked" @unlocked="onUnlocked" />
+    <UnlockScreen v-if="sessionReady && !unlocked" @unlocked="onUnlocked" />
 
     <!-- 主页 -->
-    <MainView v-else />
+    <MainView v-else-if="unlocked" />
   </div>
 </template>
 
@@ -41,6 +41,11 @@ import { initializeUpdates } from './utils/updates'
 
 let stopUpdates
 onMounted(async () => {
+  try {
+    unlocked.value = (await window.localpass.getAuthSession()).unlocked
+  } finally {
+    sessionReady.value = true
+  }
   stopUpdates = await initializeUpdates()
 })
 onBeforeUnmount(() => stopUpdates?.())
@@ -54,6 +59,7 @@ document.documentElement.dataset.theme =
     : savedTheme
 
 const unlocked = ref(false)
+const sessionReady = ref(false)
 
 function onUnlocked() {
   unlocked.value = true

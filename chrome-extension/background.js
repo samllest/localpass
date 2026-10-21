@@ -2,7 +2,96 @@
 
 const pendingCaptures = {}
 const pendingLookups = new Map()
+const captureStatusOwners = new Map()
 const CAPTURE_CONFIRM_DELAY_MS = 1800
+const MAX_INLINE_ICON_URL_LENGTH = 256 * 1024
+
+let desktopInstance = null
+let desktopUnlocked = false
+
+async function repairPage(tabId) {
+  if (!chrome.scripting?.executeScript) return
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ['content.js']
+    })
+  } catch {
+    /* Browser settings, closed tabs and restricted pages are skipped. */
+  }
+}
+async function repairOpenPages() {
+  if (!chrome.tabs.query || !chrome.scripting?.executeScript) return
+  const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] })
+  await Promise.allSettled(tabs.map((tab) => repairPage(tab.id)))
+}
+if (chrome.scripting) {
+  void repairOpenPages().catch(() => {})
+  chrome.tabs.onActivated?.addListener(({ tabId }) => void repairPage(tabId))
+  chrome.runtime.onInstalled?.addListener(() => void repairOpenPages().catch(() => {}))
+}
+
+async function checkExtensionUpdate() {
+  // Never interrupt a login capture or an account choice to reload the worker.
+  if (Object.keys(pendingCaptures).length || pendingLookups.size) return
+  try {
+    const current = chrome.runtime.getManifest().version
+    const response = await fetch(
+      `http://127.0.0.1:35320/extension-status?version=${encodeURIComponent(current)}`,
+      {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(3000)
+      }
+    )
+    if (!response.ok) return
+    const result = await response.json()
+    // A service worker can wake from idle without any desktop restart. Its first
+    // status check must not reopen an account list the user already dismissed.
+    const recovered =
+      desktopInstance !== null &&
+      result.unlocked &&
+      (!desktopUnlocked || desktopInstance !== result.instanceId)
+    desktopUnlocked = Boolean(result.unlocked)
+    desktopInstance = result.instanceId
+    if (recovered) {
+      await repairOpenPages()
+      const tabs = (await chrome.tabs.query?.({ active: true })) || []
+      await Promise.allSettled(
+        tabs.map((tab) => chrome.tabs.sendMessage(tab.id, { type: 'LP_BRIDGE_READY' }))
+      )
+    }
+    if (!result.ok || result.updating || !/^\d+(\.\d+){2,3}$/.test(result.version || '')) return
+    const wanted = result.version.split('.').map(Number),
+      installed = current.split('.').map(Number)
+    const firstDifference = wanted.findIndex((value, index) => value !== (installed[index] || 0))
+    if (firstDifference < 0 || wanted[firstDifference] <= (installed[firstDifference] || 0)) return
+    // A user may still load a separately extracted folder. Try once per version,
+    // then show the binding instructions instead of entering a reload loop.
+    const key = 'extension-reload-attempt'
+    if ((await chrome.storage.local.get(key))[key] === result.version) return
+    if (Object.keys(pendingCaptures).length || pendingLookups.size) return
+    await chrome.storage.local.set({ [key]: result.version })
+    chrome.runtime.reload()
+  } catch {
+    desktopUnlocked = false
+    /* Offline desktops and older bridges leave the working extension intact. */
+  }
+}
+
+if (chrome.alarms) {
+  chrome.alarms.create('localpass-extension-update', { periodInMinutes: 1 })
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'localpass-extension-update') void checkExtensionUpdate()
+  })
+  void checkExtensionUpdate()
+}
+
+function captureStatus(tabId, capture, state) {
+  if (captureStatusOwners.get(tabId) !== capture.statusId) return
+  // Diagnostics contain no usernames, passwords, tokens, paths or query strings.
+  const status = { state, origin: new URL(capture.payload.page_url).origin, at: Date.now() }
+  void chrome.storage?.session?.set({ [`capture-status:${tabId}`]: status }).catch(() => {})
+}
 
 function clearPendingCapture(tabId, capture) {
   if (pendingCaptures[tabId] === capture) {
@@ -38,8 +127,11 @@ async function loadSiteIcon(value) {
       url.protocol === 'chrome-extension:' &&
       url.host === chrome.runtime.id &&
       url.pathname === '/_favicon/'
+    const inlineIcon =
+      url.href.length <= MAX_INLINE_ICON_URL_LENGTH &&
+      /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(url.href)
     if (
-      (!['http:', 'https:'].includes(url.protocol) && !nativeIcon) ||
+      (!['http:', 'https:'].includes(url.protocol) && !nativeIcon && !inlineIcon) ||
       url.username ||
       url.password
     )
@@ -57,7 +149,7 @@ async function loadSiteIcon(value) {
       const { value, done } = await reader.read()
       if (done) break
       size += value.length
-      if (size > 128 * 1024) {
+      if (size > (inlineIcon ? 192 : 128) * 1024) {
         await reader.cancel()
         return ''
       }
@@ -103,6 +195,7 @@ async function enrichSite(tabId, payload) {
   const candidates = [
     ...new Set(
       [
+        payload.icon_url?.startsWith('data:') ? payload.icon_url : '',
         browserIcon,
         payload.icon_url,
         tab && sameOrigin(tab.url, payload.page_url) ? tab.favIconUrl : '',
@@ -123,6 +216,7 @@ async function sendCapture(tabId, capture) {
   if (pendingCaptures[tabId] !== capture || capture.cancelled || capture.sent || capture.sending)
     return
   capture.sending = true
+  captureStatus(tabId, capture, 'saving')
   try {
     const payload = await enrichSite(tabId, capture.payload)
     // Login failure or a later attempt may arrive while the icon is loading.
@@ -135,9 +229,22 @@ async function sendCapture(tabId, capture) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-    console.log('LocalPass capture response:', await response.json())
+    const result = await response.json()
+    const state =
+      response.status === 423
+        ? 'locked'
+        : !response.ok || !result.ok
+          ? 'save-failed'
+          : result.cancelled
+            ? 'cancelled'
+            : result.changed === false
+              ? 'unchanged'
+              : 'saved'
+    captureStatus(tabId, capture, state)
+    if (!response.ok || !result.ok) console.error('LocalPass save failed:', response.status)
   } catch (error) {
     clearPendingCapture(tabId, capture)
+    captureStatus(tabId, capture, 'disconnected')
     console.error('LocalPass capture error (is the desktop app running?):', error)
   }
 }
@@ -197,12 +304,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       cancelled: false,
       sent: false,
       submittedAt: Date.now(),
-      requestSeen: false
+      requestSeen: false,
+      statusId: Symbol()
     }
     pendingCaptures[sender.tab.id] = capture
+    captureStatusOwners.set(sender.tab.id, capture.statusId)
+    captureStatus(sender.tab.id, capture, 'submitted')
 
     // Clear the pending capture after 15 seconds to prevent stale credentials.
     setTimeout(() => {
+      if (pendingCaptures[sender.tab.id] === capture)
+        captureStatus(sender.tab.id, capture, 'expired')
       clearPendingCapture(sender.tab.id, capture)
     }, 15000)
   }
@@ -234,6 +346,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sameOrigin(sender.url, capture.payload.page_url)
     ) {
       if (message.hasLoginFields || message.hasLoginError) {
+        captureStatus(sender.tab.id, capture, 'login-failed')
         capture.cancelled = true
         clearPendingCapture(sender.tab.id, capture)
       } else if (!capture.navigationConfirmed) {
@@ -250,6 +363,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (sender.frameId ?? 0) === capture.frameId &&
       (!message.attemptId || message.attemptId === capture.attemptId)
     ) {
+      captureStatus(sender.tab.id, capture, 'login-failed')
       capture.cancelled = true
       clearPendingCapture(sender.tab.id, capture)
     }
@@ -296,6 +410,7 @@ chrome.webRequest.onCompleted.addListener(
     if (Date.now() - capture.submittedAt > 10000) return
     if (!sameOrigin(details.url, capture.payload.page_url)) return
     if (details.statusCode >= 400) {
+      captureStatus(tabId, capture, 'request-failed')
       capture.cancelled = true
       clearPendingCapture(tabId, capture)
       return

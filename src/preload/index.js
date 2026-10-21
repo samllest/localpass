@@ -20,6 +20,8 @@ const api = {
     return () => ipcRenderer.removeListener('updates:changed', listener)
   },
 
+  getAuthSession: () => ipcRenderer.invoke('auth:session'),
+
   // Authentication
   register: (username, password) => ipcRenderer.invoke('auth:register', username, password),
   login: (username, password) => ipcRenderer.invoke('auth:login', username, password),
@@ -35,8 +37,13 @@ const api = {
   getVaultInfo: () => ipcRenderer.invoke('vault:info'),
   openVaultFolder: () => ipcRenderer.invoke('vault:openFolder'),
   openExtensionFolder: () => ipcRenderer.invoke('extension:openFolder'),
-  exportVault: () => ipcRenderer.invoke('vault:export'),
-  importVault: () => ipcRenderer.invoke('vault:import'),
+  getExtensionUpdateState: () => ipcRenderer.invoke('extension:state'),
+  checkExtensionUpdate: () => ipcRenderer.invoke('extension:check'),
+  bindExtensionFolder: () => ipcRenderer.invoke('extension:bind'),
+  exportVault: (passphrase) => ipcRenderer.invoke('vault:export', passphrase),
+  selectVaultImport: () => ipcRenderer.invoke('vault:selectImport'),
+  importVault: (serialized, passphrase) =>
+    ipcRenderer.invoke('vault:import', serialized, passphrase),
   copyToClipboard: (text) => ipcRenderer.invoke('app:copy', text),
   clearMasterKey: () => ipcRenderer.invoke('app:clearMasterKey'),
   onRefreshList: (callback) => {

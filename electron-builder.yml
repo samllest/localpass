@@ -16,6 +16,8 @@ extraResources:
     to: chrome-extension
     filter:
       - '*.js'
+      - '*.html'
+      - '*.css'
       - manifest.json
       - icons/icon-16.png
       - icons/icon-32.png

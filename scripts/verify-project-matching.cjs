@@ -41,6 +41,7 @@ if (!process.versions.electron) {
       await bridge.initBridgeServer(desktop.webContents, {
         port,
         chooseAccount: (...args) => {
+          assert.equal(args[0].saving, true, 'only saving conflicts may open a desktop window')
           prompts++
           return chooser.chooseProjectAccount(...args)
         }
@@ -129,27 +130,78 @@ if (!process.versions.electron) {
         'PASS background capture prompts, separate save preserves the original password/history'
       )
 
-      const ambiguous = lookup('项目 A')
-      window = await promptWindow()
-      fs.writeFileSync(
-        path.join(__dirname, '../out/project-choice-fill.png'),
-        (await window.webContents.capturePage()).toPNG()
-      )
+      const beforeLookupPrompts = prompts
+      const chosen = await lookup('项目 A')
+      assert.equal(chosen.selected, false)
+      assert.equal(chosen.accounts.length, 2)
+      assert.equal(prompts, beforeLookupPrompts)
       assert.equal(
-        await window.webContents.executeJavaScript("document.querySelector('#confirm').disabled"),
-        true
+        BrowserWindow.getAllWindows().filter((candidate) => candidate !== desktop).length,
+        0
       )
-      await window.webContents.executeJavaScript("document.querySelector('.account input').click()")
-      assert.equal(window.isDestroyed(), false)
-      await clickChoice(window, '#confirm')
-      const chosen = await ambiguous
-      assert.equal(chosen.selected, true)
-      assert.equal(chosen.accounts.length, 1)
-      const account = chosen.accounts[0]
+
+      // Exercise the actual content script using accounts/tokens returned by
+      // the real HTTP bridge, without opening any desktop selection window.
+      const login = new BrowserWindow({
+        show: false,
+        webPreferences: { backgroundThrottling: false, contextIsolation: true, sandbox: true }
+      })
+      await login.loadURL(
+        'data:text/html;charset=utf-8,' +
+          encodeURIComponent(
+            '<form><input id="username" autocomplete="username"><input id="password" type="password" autocomplete="current-password"><button type="submit">登录</button></form>'
+          )
+      )
+      await login.webContents.executeJavaScript(`
+        window.fixtureAccounts = ${JSON.stringify(chosen.accounts)};
+        window.fixtureMessages = [];
+        window.chrome = { runtime: { sendMessage(message, callback) {
+          fixtureMessages.push(message);
+          if (message.type === 'LP_LOOKUP') callback({ok:true, accounts:fixtureAccounts, selected:false});
+        } } };
+        document.querySelector('form').addEventListener('submit', event => event.preventDefault());
+      `)
+      await login.webContents.executeJavaScript(
+        fs.readFileSync(path.join(__dirname, '../chrome-extension/content.js'), 'utf8')
+      )
+      login.webContents.focus()
+      await login.webContents.executeJavaScript(`document.querySelector('#password').focus()`)
+      await wait(30)
+      assert.equal(
+        await login.webContents.executeJavaScript(
+          `document.querySelectorAll('[data-localpass-picker] button').length`
+        ),
+        2,
+        await login.webContents.executeJavaScript(
+          `JSON.stringify({visibility:document.visibilityState,active:document.activeElement.id,messages:fixtureMessages.map(m=>m.type)})`
+        )
+      )
+      const account = chosen.accounts[1]
+      await login.webContents.executeJavaScript(
+        `document.querySelectorAll('[data-localpass-picker] button')[1].click()`
+      )
+      assert.deepEqual(
+        await login.webContents.executeJavaScript(
+          `({ username: document.querySelector('#username').value, password: document.querySelector('#password').value, picker: !!document.querySelector('[data-localpass-picker]') })`
+        ),
+        {
+          username: account.username,
+          password: account.password,
+          picker: false
+        }
+      )
+      await login.webContents.executeJavaScript(
+        `document.querySelector('button[type="submit"]').click()`
+      )
+      const selectedToken = await login.webContents.executeJavaScript(
+        `fixtureMessages.find(message => message.type === 'LP_LOGIN_SUBMITTED').payload.selection_token`
+      )
+      assert.equal(selectedToken, account.selectionToken)
+      login.destroy()
       const promptCount = prompts
       await capture({
         ...payload('项目 A', 'Synthetic!SelectedUpdate123'),
-        selection_token: account.selectionToken
+        selection_token: selectedToken
       })
       assert.equal(prompts, promptCount)
       assert.equal(
@@ -158,85 +210,45 @@ if (!process.versions.electron) {
       )
       assert.equal((await lookup('项目 B')).accounts[0].password, 'Synthetic!B123')
       console.log(
-        'PASS same-name chooser selects exactly one record; selection token routes capture to it'
+        'PASS multiple accounts fill through the webpage picker; its token updates exactly the chosen record'
       )
 
-      const abandonedController = new AbortController()
-      const abandoned = lookup('项目 A', { signal: abandonedController.signal }).catch(
-        (error) => error.name
+      const concurrent = await Promise.all([lookup('项目 A'), lookup('项目 A'), lookup('')])
+      assert.deepEqual(
+        concurrent.map((result) => result.accounts.length),
+        [2, 2, 3]
       )
-      window = await promptWindow()
-      abandonedController.abort()
-      assert.equal(await abandoned, 'AbortError')
-      await wait(400)
-      assert.equal(window.isDestroyed(), true)
-      console.log('PASS leaving a login form aborts its lookup and closes the desktop chooser')
-
-      const sharedController = new AbortController()
-      const shared = lookup('项目 A', { signal: sharedController.signal }).catch(
-        (error) => error.name
-      )
-      window = await promptWindow()
-      const sharedCount = prompts
-      const survivor = lookup('项目 A')
-      await wait(80)
-      sharedController.abort()
-      assert.equal(await shared, 'AbortError')
-      await wait(250)
-      assert.equal(prompts, sharedCount)
-      assert.equal(window.isDestroyed(), false)
-      await clickChoice(window, '.account input')
-      await clickChoice(window, '#confirm')
-      assert.equal((await survivor).accounts.length, 1)
-      console.log(
-        'PASS concurrent lookups share one chooser; cancelling one does not cancel another'
-      )
-
-      const firstController = new AbortController()
-      const queuedController = new AbortController()
-      const first = lookup('项目 A', { signal: firstController.signal }).catch(
-        (error) => error.name
-      )
-      window = await promptWindow()
-      const queued = lookup('', { signal: queuedController.signal }).catch((error) => error.name)
-      await wait(80)
-      queuedController.abort()
-      await queued
-      firstController.abort()
-      await first
-      await wait(450)
+      assert.equal(prompts, promptCount)
       assert.equal(
         BrowserWindow.getAllWindows().filter((candidate) => candidate !== desktop).length,
         0
       )
-      const singleHtml = chooser.choiceHtml(
-        { identity: 'localhost:3000', accounts: [a], saving: false },
-        'fixture'
-      )
-      assert.equal(singleHtml.includes('匹配到多个账号'), false)
       console.log(
-        'PASS abandoned queued lookups never reopen a stale prompt; single records use accurate copy'
+        'PASS concurrent and unnamed-project lookups return immediately without desktop windows'
       )
 
-      const cancelled = lookup('项目 A')
+      const cancelled = capture(payload('项目 A', 'Synthetic!Cancelled123'))
       window = await promptWindow()
       window.close()
-      assert.deepEqual((await cancelled).accounts, [])
-      const locked = lookup('项目 A')
+      assert.equal((await cancelled).cancelled, true)
+      const locked = capture(payload('项目 A', 'Synthetic!Locked123'))
       window = await promptWindow()
       db.clearMasterKey()
       chooser.cancelProjectChoices()
       assert.equal((await locked).ok, false)
+      assert.deepEqual((await lookup('项目 A')).accounts, [])
       db.setMasterPassword('Synthetic!Master123', 'synthetic-project-salt')
-      console.log('PASS close/cancel and vault locking never return a selected password')
+      console.log(
+        'PASS save conflict cancellation and vault locking preserve records; locked lookups release no passwords'
+      )
 
-      const backup = db.exportVaultData()
+      const backup = db.exportVaultData('Synthetic backup passphrase 2026')
       const before = db
         .listApps()
         .map((row) => [row.project_name, row.username, row.password])
         .sort()
       for (const row of db.listApps()) db.deleteApp(row.id)
-      db.importVaultData(backup)
+      db.importVaultData(backup, 'Synthetic backup passphrase 2026')
       assert.deepEqual(
         db
           .listApps()

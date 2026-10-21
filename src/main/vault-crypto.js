@@ -7,6 +7,11 @@ export function deriveVaultKey(password, salt) {
   return scryptSync(String(password), `localpass-vault:${salt}`, 32)
 }
 
+export function deriveBackupKey(passphrase, salt) {
+  if (!passphrase || !salt) throw new Error('Backup passphrase and salt are required')
+  return scryptSync(String(passphrase), `localpass-backup:v2:${salt}`, 32)
+}
+
 export function encryptSecret(plaintext, key) {
   if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('A 32-byte vault key is required')
   const iv = randomBytes(12)
