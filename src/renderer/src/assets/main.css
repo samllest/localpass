@@ -1376,7 +1376,7 @@ input[type='checkbox'] {
   color: var(--text-3);
   margin-top: 3px;
 }
-.preference-row > button,
+.preference-row > .button,
 .preference-row > select {
   flex-shrink: 0;
 }
@@ -1512,6 +1512,10 @@ input[type='checkbox'] {
   display: flex;
   flex-direction: column;
   min-height: 521px;
+}
+.backup-form {
+  min-height: 0;
+  padding-top: 4px;
 }
 .account-form .dialog-actions {
   margin-top: auto;

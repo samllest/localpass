@@ -1,5 +1,5 @@
 ﻿import Database from 'better-sqlite3'
-import { pbkdf2Sync, randomBytes, randomUUID } from 'crypto'
+import { createHash, pbkdf2Sync, randomBytes, randomUUID } from 'crypto'
 import { join } from 'path'
 
 import { getDbDir } from './storage.js'
@@ -112,4 +112,17 @@ export function loginUser(username, password) {
 export function closeSystemDb() {
   systemDb?.close()
   systemDb = null
+}
+
+// Bind update handoffs to the unchanged account catalog and vault directory.
+export function getUpdateAccount(username) {
+  const user = systemDb?.prepare('SELECT * FROM users WHERE username = ?').get(username)
+  if (!user) return null
+  return {
+    username: user.username,
+    dbFilename: user.db_filename,
+    fingerprint: createHash('sha256')
+      .update(JSON.stringify([getDbDir(), user]))
+      .digest('hex')
+  }
 }

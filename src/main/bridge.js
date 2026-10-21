@@ -30,7 +30,10 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload))
 }
 
-export function initBridgeServer(winWebContents, { port = 35320, chooseAccount } = {}) {
+export function initBridgeServer(
+  winWebContents,
+  { port = 35320, chooseAccount, extensionStatus } = {}
+) {
   webContents = winWebContents
   chooseProject = chooseAccount || (async () => null)
 
@@ -38,6 +41,7 @@ export function initBridgeServer(winWebContents, { port = 35320, chooseAccount }
     return startPromise
   }
 
+  const instanceId = randomUUID()
   server = createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
@@ -50,6 +54,16 @@ export function initBridgeServer(winWebContents, { port = 35320, chooseAccount }
     }
 
     const requestUrl = new URL(req.url || '/', 'http://127.0.0.1')
+
+    if (req.method === 'GET' && requestUrl.pathname === '/extension-status') {
+      res.setHeader('Cache-Control', 'no-store')
+      sendJson(res, 200, {
+        ...(extensionStatus?.(requestUrl.searchParams.get('version')) || { ok: false }),
+        instanceId,
+        unlocked: isVaultUnlocked()
+      })
+      return
+    }
 
     if (req.method === 'GET' && requestUrl.pathname === '/lookup') {
       if (!isVaultUnlocked()) {
@@ -77,9 +91,7 @@ export function initBridgeServer(winWebContents, { port = 35320, chooseAccount }
           const pending = { consumers: new Set(), promise: null }
           pendingLookups.set(key, pending)
           pending.promise = Promise.resolve().then(() =>
-            resolveProjectLookup(listCredentialsByIdentity(site.identity), site, (options) =>
-              chooseProject(options, () => valid() && pending.consumers.size > 0)
-            )
+            resolveProjectLookup(listCredentialsByIdentity(site.identity), site)
           )
           void pending.promise
             .finally(() => {

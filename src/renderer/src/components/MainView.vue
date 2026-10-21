@@ -297,7 +297,7 @@
                 <div class="preference-row">
                   <div>
                     <strong>导入密码</strong>
-                    <p>从当前密码库导出的 LocalPass 加密备份中恢复</p>
+                    <p>导入加密 JSON 或旧版备份，并在此设备中合并显示</p>
                   </div>
                   <button class="button button-outline" :disabled="backupBusy" @click="importVault">
                     选择文件
@@ -306,7 +306,7 @@
                 <div class="preference-row">
                   <div>
                     <strong>导出密码</strong>
-                    <p>保存一份加密备份，妥善保管你的密码</p>
+                    <p>跨设备迁移使用独立备份口令，不依赖登录主密码</p>
                   </div>
                   <button class="button button-outline" :disabled="backupBusy" @click="exportVault">
                     导出备份
@@ -314,27 +314,28 @@
                 </div>
               </section>
               <h2 class="section-title">在浏览器中使用</h2>
-              <section class="settings-card extension-card">
-                <span class="extension-icon" aria-hidden="true">◎</span>
-                <div>
-                  <h3>与 LocalPass 浏览器扩展配合使用</h3>
-                  <p>解锁密码库后，扩展可以保存登录信息，并在网站登录时提供账号选择。</p>
-                  <details>
-                    <summary>如何安装扩展</summary>
-                    <ol>
-                      <li>在 Chrome 地址栏输入 chrome://extensions。</li>
-                      <li>打开「开发者模式」，选择「加载已解压的扩展程序」。</li>
-                      <li>点击下方「打开扩展目录」，选择打开的 chrome-extension 文件夹。</li>
-                      <li>保持 LocalPass 已解锁，然后打开网站登录页。</li>
-                    </ol>
-                  </details>
-                  <button class="button button-outline" @click="openExtensionFolder">
-                    打开扩展目录
-                  </button>
-                </div>
-              </section>
+              <ExtensionUpdate />
               <h2 class="section-title">版本与更新</h2>
               <AppUpdate settings />
+              <h2 class="section-title">项目与反馈</h2>
+              <section class="settings-card">
+                <div class="preference-row">
+                  <div class="vault-location">
+                    <strong>GitHub 仓库</strong>
+                    <p>查看源码、版本发布和提交反馈，欢迎 Star 支持项目。</p>
+                    <p class="vault-file-path">https://github.com/samllest/localpass</p>
+                  </div>
+                  <a
+                    class="button button-outline"
+                    href="https://github.com/samllest/localpass"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="在默认浏览器中访问 LocalPass GitHub 仓库"
+                  >
+                    访问 GitHub <UiIcon name="external" />
+                  </a>
+                </div>
+              </section>
               <p class="page-footnote">
                 <span aria-hidden="true">◈</span>LocalPass · 本地密码管理器
               </p>
@@ -381,6 +382,63 @@
         </button>
       </footer>
     </VaultDialog>
+    <VaultDialog
+      v-if="backupDialogMode"
+      :title="backupDialogMode === 'export' ? '导出加密备份' : '导入加密备份'"
+      :busy="backupBusy"
+      @close="closeBackupDialog"
+    >
+      <form class="account-form backup-form" @submit.prevent="submitBackup">
+        <p class="form-intro">
+          {{
+            backupDialogMode === 'export'
+              ? '设置独立备份口令。请妥善保管；新设备导入时需要使用同一口令。'
+              : '请输入创建这份备份时设置的备份口令，系统登录主密码不适用于这里。'
+          }}
+        </p>
+        <div class="form-row">
+          <label for="backup-passphrase">备份口令</label>
+          <input
+            id="backup-passphrase"
+            v-model="backupPassphrase"
+            type="password"
+            autocomplete="new-password"
+            :placeholder="backupDialogMode === 'export' ? '至少 12 个字符' : '输入备份口令'"
+            required
+            :minlength="backupDialogMode === 'export' ? 12 : undefined"
+            autofocus
+            :disabled="backupBusy"
+          />
+        </div>
+        <div v-if="backupDialogMode === 'export'" class="form-row">
+          <label for="backup-passphrase-confirm">确认备份口令</label>
+          <input
+            id="backup-passphrase-confirm"
+            v-model="backupPassphraseConfirm"
+            type="password"
+            autocomplete="new-password"
+            placeholder="再次输入备份口令"
+            required
+            minlength="12"
+            :disabled="backupBusy"
+          />
+        </div>
+        <p v-if="backupError" class="form-err" role="alert">{{ backupError }}</p>
+        <footer class="dialog-actions">
+          <button
+            class="button button-subtle"
+            type="button"
+            :disabled="backupBusy"
+            @click="closeBackupDialog"
+          >
+            取消
+          </button>
+          <button class="button button-primary" type="submit" :disabled="backupBusy">
+            {{ backupBusy ? '处理中…' : backupDialogMode === 'export' ? '继续导出' : '导入并合并' }}
+          </button>
+        </footer>
+      </form>
+    </VaultDialog>
     <Transition name="toast"
       ><div v-if="toast" class="manager-toast" :class="toast.type" role="status">
         {{ toast.message }}
@@ -398,6 +456,7 @@ import AddEditModal from './AddEditModal.vue'
 import PasswordDetails from './PasswordDetails.vue'
 import VaultDialog from './VaultDialog.vue'
 import AppUpdate from './AppUpdate.vue'
+import ExtensionUpdate from './ExtensionUpdate.vue'
 import PasswordCheckup from './PasswordCheckup.vue'
 import { filterGroups, groupAccounts, groupKey, recordId } from '../utils/vault'
 
@@ -434,6 +493,11 @@ const pendingDelete = ref(null)
 const deleteError = ref('')
 const deleting = ref(false)
 const backupBusy = ref(false)
+const backupDialogMode = ref('')
+const backupPassphrase = ref('')
+const backupPassphraseConfirm = ref('')
+const backupError = ref('')
+const pendingBackupData = ref('')
 const vaultInfo = ref(null)
 const vaultInfoError = ref('')
 const closePreference = ref(null)
@@ -638,11 +702,10 @@ async function onCopy(value) {
 async function importVault() {
   backupBusy.value = true
   try {
-    const result = await window.localpass.importVault()
-    if (!result?.canceled) {
-      showToast(`已导入 ${result.imported} 个账号`)
-      await refreshApps()
-    }
+    const result = await window.localpass.selectVaultImport()
+    if (result?.canceled) return
+    pendingBackupData.value = result.serialized
+    backupDialogMode.value = 'import'
   } catch (error) {
     showToast(error.message || '导入失败', 'error')
   } finally {
@@ -650,12 +713,52 @@ async function importVault() {
   }
 }
 async function exportVault() {
+  backupError.value = ''
+  backupDialogMode.value = 'export'
+}
+function closeBackupDialog() {
+  if (backupBusy.value) return
+  backupDialogMode.value = ''
+  backupPassphrase.value = ''
+  backupPassphraseConfirm.value = ''
+  backupError.value = ''
+  pendingBackupData.value = ''
+}
+async function submitBackup() {
+  backupError.value = ''
+  if (
+    backupDialogMode.value === 'export' &&
+    backupPassphrase.value !== backupPassphraseConfirm.value
+  ) {
+    backupError.value = '两次输入的备份口令不一致'
+    return
+  }
+  if (backupDialogMode.value === 'export' && backupPassphrase.value.length < 12) {
+    backupError.value = '备份口令至少需要 12 个字符'
+    return
+  }
   backupBusy.value = true
   try {
-    const result = await window.localpass.exportVault()
-    if (!result?.canceled) showToast('加密备份已导出')
+    if (backupDialogMode.value === 'export') {
+      const result = await window.localpass.exportVault(backupPassphrase.value)
+      if (!result?.canceled) {
+        backupBusy.value = false
+        closeBackupDialog()
+        showToast('加密 JSON 备份已导出')
+      }
+    } else {
+      const result = await window.localpass.importVault(
+        pendingBackupData.value,
+        backupPassphrase.value
+      )
+      backupBusy.value = false
+      closeBackupDialog()
+      showToast(`已导入 ${result.imported} 个账号`)
+      await refreshApps()
+    }
   } catch (error) {
-    showToast(error.message || '导出失败', 'error')
+    backupError.value =
+      error.message || (backupDialogMode.value === 'export' ? '导出失败' : '导入失败')
   } finally {
     backupBusy.value = false
   }
@@ -672,13 +775,6 @@ async function openVaultFolder() {
     await window.localpass.openVaultFolder()
   } catch (error) {
     showToast(error.message || '打开文件夹失败', 'error')
-  }
-}
-async function openExtensionFolder() {
-  try {
-    await window.localpass.openExtensionFolder()
-  } catch (error) {
-    showToast(error.message || '打开扩展目录失败', 'error')
   }
 }
 async function loadClosePreference() {

@@ -112,6 +112,34 @@ if (!process.versions.electron) {
       })
       assert.equal(db.getHistory(old.id).length, 2)
       console.log('PASS old schema upgrades without inventing a port or changing legacy records')
+      const legacyRecord = {
+        identity: 'legacy-backup.example',
+        display_name: 'Legacy Backup',
+        category: 'web',
+        username: 'legacy-user',
+        password: 'SyntheticLegacyBackup!123'
+      }
+      const legacyPayload = JSON.stringify({
+        format: 'localpass-export',
+        version: 1,
+        records: [legacyRecord]
+      })
+      const legacyEncrypted = crypto.encryptSecret(
+        legacyPayload,
+        crypto.deriveVaultKey('synthetic-master', 'fixture-salt')
+      )
+      const legacyBackup = JSON.stringify({
+        format: 'localpass-export',
+        version: 1,
+        encrypted: true,
+        ...legacyEncrypted
+      })
+      assert.equal(db.importVaultData(legacyBackup), 1)
+      assert.equal(
+        db.findAppByIdentity(legacyRecord.identity, legacyRecord.username).password,
+        legacyRecord.password
+      )
+      console.log('PASS legacy v1 backups remain importable on the original vault')
       const icon =
         'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
       const record = {
@@ -147,9 +175,10 @@ if (!process.versions.electron) {
       console.log('PASS metadata refreshes without creating a password version')
       db.updateApp({ app_id: id, display_name: 'My custom label' })
       assert.equal(db.findAppByIdentity(record.identity, record.username).icon_data, icon)
-      const backup = db.exportVaultData()
+      const backup = db.exportVaultData('Synthetic backup passphrase 2026')
+      assert.throws(() => db.importVaultData(backup, 'incorrect backup passphrase'), /备份口令错误/)
       db.deleteApp(id)
-      db.importVaultData(backup)
+      db.importVaultData(backup, 'Synthetic backup passphrase 2026')
       const restored = db.findAppByIdentity(record.identity, record.username)
       assert.equal(restored.icon_data, icon)
       assert.equal(restored.page_title, 'Agent Router · 控制台')
@@ -165,6 +194,20 @@ if (!process.versions.electron) {
       assert.equal(moved.icon_data, '')
       assert.equal(moved.page_title, '')
       assert.equal(moved.site_url, 'http://different.example:5000')
+      const transferableBackup = db.exportVaultData('Synthetic backup passphrase 2026')
+      db.closeVault()
+      db.initDB('destination.db', { createIfMissing: true })
+      db.setMasterPassword('different-device-master', 'different-device-salt')
+      assert.equal(db.importVaultData(transferableBackup, 'Synthetic backup passphrase 2026'), 4)
+      assert.equal(
+        db.findAppByIdentity('different.example:5000', record.username).password,
+        record.password
+      )
+      assert.equal(
+        db.findAppByIdentity('different.example:5000', record.username).site_url,
+        'http://different.example:5000'
+      )
+      console.log('PASS encrypted JSON imports into a vault with a different master password')
       db.closeVault()
       db.initDB('fixture.db')
       db.setMasterPassword('synthetic-master', 'fixture-salt')

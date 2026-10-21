@@ -9,9 +9,105 @@ const png = Buffer.from(
   'base64'
 )
 
+test('worker recovery reattaches every open web tab and tolerates restricted frames', async () => {
+  const { context } = background()
+  const injected = []
+  context.chrome.tabs.query = async (query) => {
+    assert.deepEqual(Array.from(query.url), ['http://*/*', 'https://*/*'])
+    return [{ id: 11 }, { id: 12 }]
+  }
+  context.chrome.scripting = {
+    executeScript: async (options) => {
+      injected.push(options)
+      if (options.target.tabId === 12) throw new Error('Restricted frame')
+    }
+  }
+  await vm.runInContext('repairOpenPages()', context)
+  assert.deepEqual(
+    injected.map((entry) => entry.target.tabId),
+    [11, 12]
+  )
+  for (const entry of injected) {
+    assert.equal(entry.target.allFrames, true)
+    assert.deepEqual(Array.from(entry.files), ['content.js'])
+  }
+})
+
+test('desktop restart and unlocking notify focused pages without reloading websites', async () => {
+  const { context } = background()
+  const notified = []
+  let instanceId = 'first',
+    unlocked = false
+  context.chrome.runtime.getManifest = () => ({ version: '1.3.7' })
+  context.chrome.tabs.query = async () => [{ id: 11 }]
+  context.chrome.tabs.sendMessage = async (id, message) => notified.push([id, message.type])
+  context.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        ok: true,
+        version: '1.3.7',
+        instanceId,
+        unlocked
+      })
+    )
+  await vm.runInContext('checkExtensionUpdate()', context)
+  assert.equal(notified.length, 0)
+  unlocked = true
+  await vm.runInContext('checkExtensionUpdate()', context)
+  await vm.runInContext('checkExtensionUpdate()', context)
+  assert.equal(notified.length, 1)
+  instanceId = 'replacement'
+  await vm.runInContext('checkExtensionUpdate()', context)
+  assert.deepEqual(notified, [
+    [11, 'LP_BRIDGE_READY'],
+    [11, 'LP_BRIDGE_READY']
+  ])
+})
+
+test('extension reloads once for a newer prepared version and never during an active login', async () => {
+  const { context } = background()
+  let reloads = 0
+  let checks = 0
+  let version = '1.3.8'
+  let updating = false
+  const storage = {}
+  context.chrome.runtime.getManifest = () => ({ version: '1.3.7' })
+  context.chrome.runtime.reload = () => {
+    reloads++
+  }
+  context.chrome.storage.local = {
+    get: async (key) => ({ [key]: storage[key] }),
+    set: async (values) => Object.assign(storage, values)
+  }
+  context.fetch = async () => {
+    checks++
+    return new Response(JSON.stringify({ ok: true, version, updating }))
+  }
+  vm.runInContext('pendingLookups.set("login", {})', context)
+  await vm.runInContext('checkExtensionUpdate()', context)
+  assert.equal(checks, 0)
+  vm.runInContext('pendingLookups.clear()', context)
+  updating = true
+  await vm.runInContext('checkExtensionUpdate()', context)
+  assert.equal(reloads, 0)
+  updating = false
+  version = '1.3.5'
+  await vm.runInContext('checkExtensionUpdate()', context)
+  assert.equal(reloads, 0)
+  version = '1.3.8'
+  await vm.runInContext('checkExtensionUpdate()', context)
+  assert.equal(reloads, 1)
+  await vm.runInContext('checkExtensionUpdate()', context)
+  assert.equal(reloads, 1, 'separately extracted folders must not enter a reload loop')
+  context.chrome.runtime.getManifest = () => ({ version: '1.3.8' })
+  await vm.runInContext('checkExtensionUpdate()', context)
+  assert.equal(reloads, 1)
+})
+
 function background(options = {}) {
   const messages = []
   const timers = []
+  const statuses = {}
   let onMessage, onCompleted, onRedirect
   const context = vm.createContext({
     URL,
@@ -25,6 +121,11 @@ function background(options = {}) {
       timers.push({ callback, delay })
     },
     chrome: {
+      storage: {
+        session: {
+          set: async (values) => Object.assign(statuses, values)
+        }
+      },
       runtime: {
         id: 'fixture',
         getURL: (value) => `chrome-extension://fixture${value}`,
@@ -68,6 +169,8 @@ function background(options = {}) {
       messages.push({ url: address, config })
       if (address.includes('127.0.0.1:35320') && options.lookupFetch && address.includes('/lookup'))
         return options.lookupFetch(address, config)
+      if (address.endsWith('/capture') && options.captureFetch)
+        return options.captureFetch(address, config)
       if (address.includes('127.0.0.1:35320'))
         return new Response(JSON.stringify({ ok: true, accounts: [] }))
       if (options.iconFetch) return options.iconFetch(address)
@@ -88,6 +191,7 @@ function background(options = {}) {
     context,
     messages,
     timers,
+    status: () => statuses['capture-status:7'],
     submit: (attemptId) =>
       onMessage(
         { type: 'LP_LOGIN_SUBMITTED', payload, attemptId },
@@ -310,6 +414,22 @@ test('an unavailable favicon does not prevent saving the password and name', asy
   assert.equal(saved.site_name, 'Agent Router')
 })
 
+test('inline raster icons are normalized while oversized and active data URLs are rejected', async () => {
+  const fixture = background()
+  const inline = `data:image/png;base64,${png.toString('base64')}`
+  assert.match(await fixture.context.loadSiteIcon(inline), /^data:image\/png;base64,/)
+  const fetched = fixture.messages.length
+  for (const value of [
+    'data:image/svg+xml;base64,PHN2Zy8+',
+    'data:text/html;base64,PHNjcmlwdC8+',
+    'data:image/png;base64,' + 'A'.repeat(256 * 1024),
+    'data:image/png;base64,not-valid!'
+  ]) {
+    assert.equal(await fixture.context.loadSiteIcon(value), '')
+  }
+  assert.equal(fixture.messages.length, fetched)
+})
+
 test('a login failure while loading the icon cancels the pending capture', async () => {
   let release
   const fixture = background({
@@ -328,4 +448,68 @@ test('a login failure while loading the icon cancels the pending capture', async
     fixture.messages.some((message) => message.url.endsWith('/capture')),
     false
   )
+})
+
+test('diagnostics record submission, expiry and successful persistence without storing secrets', async () => {
+  const fixture = background()
+  fixture.submit('diagnostic-attempt')
+  assert.equal(fixture.status().state, 'submitted')
+  assert.deepEqual(Object.keys(fixture.status()).sort(), ['at', 'origin', 'state'])
+  assert.equal(fixture.status().origin, 'http://10.0.15.33:3000')
+  assert.equal(JSON.stringify(fixture.status()).includes('synthetic-only'), false)
+  await fixture.send()
+  assert.equal(fixture.status().state, 'saved')
+  fixture.timers.find((timer) => timer.delay === 15000).callback()
+  assert.equal(fixture.status().state, 'saved')
+
+  const expired = background()
+  expired.submit('expired')
+  expired.timers.find((timer) => timer.delay === 15000).callback()
+  assert.equal(expired.status().state, 'expired')
+})
+
+test('HTTP and application save failures are reported instead of being treated as success', async () => {
+  for (const [status, body, expected] of [
+    [423, { ok: false, error: 'Vault locked' }, 'locked'],
+    [500, { ok: false }, 'save-failed'],
+    [200, { ok: false }, 'save-failed'],
+    [200, { ok: true, changed: false }, 'unchanged'],
+    [200, { ok: true, changed: false, cancelled: true }, 'cancelled']
+  ]) {
+    const fixture = background({
+      captureFetch: async () => new Response(JSON.stringify(body), { status })
+    })
+    fixture.submit('save-result')
+    await fixture.send()
+    assert.equal(fixture.status().state, expected)
+  }
+})
+
+test('a connection failure reports disconnected without retaining the pending credential', async () => {
+  const fixture = background({
+    captureFetch: async () => {
+      throw new TypeError('Failed to fetch')
+    }
+  })
+  fixture.submit('offline')
+  await fixture.send()
+  assert.equal(fixture.status().state, 'disconnected')
+  assert.equal(vm.runInContext('pendingCaptures[7]', fixture.context), undefined)
+})
+
+test('a late save response cannot replace the status of a newer login', async () => {
+  let release
+  const fixture = background({
+    captureFetch: () =>
+      new Promise((resolve) => {
+        release = resolve
+      })
+  })
+  fixture.submit('old-attempt')
+  const saving = fixture.send()
+  await new Promise((resolve) => setImmediate(resolve))
+  fixture.submit('new-attempt')
+  release(new Response(JSON.stringify({ ok: true, changed: true })))
+  await saving
+  assert.equal(fixture.status().state, 'submitted')
 })

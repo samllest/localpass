@@ -1,9 +1,10 @@
 import Database from 'better-sqlite3'
+import { randomBytes } from 'crypto'
 import { join } from 'path'
 import { existsSync } from 'fs'
 
 import { getDbDir } from './storage.js'
-import { decryptSecret, deriveVaultKey, encryptSecret } from './vault-crypto.js'
+import { decryptSecret, deriveBackupKey, deriveVaultKey, encryptSecret } from './vault-crypto.js'
 import { normalizeSiteMetadata } from '../shared/site-metadata.js'
 import { isDevelopmentSite, projectKey } from '../shared/project-matching.js'
 
@@ -57,7 +58,24 @@ export function setMasterPassword(password, salt) {
   masterKey = deriveVaultKey(password, salt)
 }
 
+// Main-process-only update handoff; never exposed through IPC or the bridge.
+export function copyVaultKey() {
+  ensureUnlocked()
+  return Buffer.from(masterKey)
+}
+
+export function restoreVaultKey(key) {
+  ensureVaultOpen()
+  if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('Invalid vault key')
+  const sample = db
+    .prepare('SELECT password_blob, iv FROM credentials WHERE password_blob IS NOT NULL LIMIT 1')
+    .get()
+  if (sample) decryptSecret(sample.password_blob, sample.iv, key)
+  masterKey = Buffer.from(key)
+}
+
 export function clearMasterKey() {
+  masterKey?.fill(0)
   masterKey = null
   vaultRevision++
 }
@@ -527,8 +545,11 @@ export function listCredentialsByIdentity(identity) {
     .map(mapCredentialRow)
 }
 
-export function exportVaultData() {
+export function exportVaultData(passphrase) {
   ensureUnlocked()
+  if (typeof passphrase !== 'string' || passphrase.length < 12) {
+    throw new Error('备份口令至少需要 12 个字符')
+  }
 
   const records = listApps().map((record) => ({
     identity: record.identity,
@@ -543,17 +564,21 @@ export function exportVaultData() {
     password: record.password
   }))
   const payload = JSON.stringify({ format: 'localpass-export', version: 1, records })
-  const { blob, iv } = encryptSecret(payload, masterKey)
+  const salt = randomBytes(16).toString('base64')
+  const { blob, iv } = encryptSecret(payload, deriveBackupKey(passphrase, salt))
 
   return JSON.stringify(
-    { format: 'localpass-export', version: 1, encrypted: true, blob, iv },
+    { format: 'localpass-export', version: 2, encrypted: true, kdf: 'scrypt', salt, blob, iv },
     null,
     2
   )
 }
 
-export function importVaultData(serialized) {
+export function importVaultData(serialized, passphrase) {
   ensureUnlocked()
+  if (typeof serialized !== 'string' || Buffer.byteLength(serialized, 'utf8') > 50 * 1024 * 1024) {
+    throw new Error('备份文件过大或无效')
+  }
 
   let envelope
   try {
@@ -562,15 +587,32 @@ export function importVaultData(serialized) {
     throw new Error('导入文件格式无效')
   }
 
-  if (envelope?.format !== 'localpass-export' || envelope?.version !== 1 || !envelope.encrypted) {
+  if (envelope?.format !== 'localpass-export' || !envelope.encrypted) {
     throw new Error('不是有效的 LocalPass 加密备份')
   }
 
   let payload
   try {
-    payload = JSON.parse(decryptSecret(envelope.blob, envelope.iv, masterKey))
+    let key
+    if (envelope.version === 2 && envelope.kdf === 'scrypt') {
+      if (typeof passphrase !== 'string' || !passphrase) throw new Error('请输入备份口令')
+      if (
+        typeof envelope.salt !== 'string' ||
+        Buffer.from(envelope.salt, 'base64').length !== 16 ||
+        typeof envelope.blob !== 'string' ||
+        envelope.blob.length > 70 * 1024 * 1024
+      ) {
+        throw new Error('Invalid encrypted backup')
+      }
+      key = deriveBackupKey(passphrase, envelope.salt)
+    } else if (envelope.version === 1) {
+      key = masterKey
+    } else {
+      throw new Error('Unsupported backup version')
+    }
+    payload = JSON.parse(decryptSecret(envelope.blob, envelope.iv, key))
   } catch {
-    throw new Error('备份无法解密，可能来自其他密码库')
+    throw new Error('备份口令错误，或备份文件已损坏')
   }
 
   if (!Array.isArray(payload?.records)) {

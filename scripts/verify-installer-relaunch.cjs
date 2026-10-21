@@ -26,8 +26,7 @@ async function spawnReady(executable, args, options) {
       })
       return child
     } catch (error) {
-      if (attempt >= 9 || !['EBUSY', 'EPERM', 'EACCES', 'UNKNOWN'].includes(error.code))
-        throw error
+      if (attempt >= 9 || !['EBUSY', 'EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) throw error
       await new Promise((resolve) => setTimeout(resolve, 2000))
     }
   }
@@ -131,6 +130,17 @@ async function waitFor(predicate) {
     0,
     'silent fresh installation must not unexpectedly start a previously stopped app'
   )
+  const dataFolder = path.join(process.env.APPDATA, name)
+  const resumeMarker = path.join(dataFolder, 'update-resume.marker')
+  assert.equal(fs.existsSync(resumeMarker), false, 'fresh install must not resume unlock')
+  fs.mkdirSync(dataFolder, { recursive: true })
+  fs.writeFileSync(
+    path.join(dataFolder, 'update-session.bin'),
+    'synthetic encrypted capsule sentinel'
+  )
+  // Even a leftover capsule does not authorize a stopped installation to resume.
+  await run(installer, ['/S'])
+  assert.equal(fs.existsSync(resumeMarker), false)
   const initial = await spawnReady(path.join(installed, name + '.exe'), [], {
     windowsHide: true,
     detached: true,
@@ -142,6 +152,8 @@ async function waitFor(predicate) {
   await run(installer, ['/S'])
   await waitFor(() => starts().length === 2)
   assert.notEqual(starts()[0], starts()[1])
+  assert.ok(fs.existsSync(resumeMarker), 'running reinstall must create a one-time resume marker')
+  fs.rmSync(dataFolder, { recursive: true, force: true })
   console.log(
     'PASS silent reinstall stops the old process and automatically launches exactly one replacement'
   )
