@@ -138,3 +138,20 @@ test('shorter configured inactivity limits use app activity rather than system i
   f.advance(5 * 60000)
   assert.equal(session.expired(), true)
 })
+
+test('unlimited inactivity keeps the session alive until the fixed 31 day expiry', (t) => {
+  const f = fixture(t)
+  const session = createUnlockSession({ ...f.options, idleMinutes: () => 0 })
+  assert.deepEqual(
+    session.restore(
+      () => true,
+      () => {}
+    ),
+    account
+  )
+  f.advance(10 * DAY)
+  assert.equal(session.expired(), false)
+  assert.equal(session.touch(), true)
+  f.advance(21 * DAY + 1)
+  assert.equal(session.expired(), true)
+})

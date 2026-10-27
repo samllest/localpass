@@ -34,7 +34,7 @@ export function createUnlockSession({
       value.lastActivityAt <= at + 5000 &&
       value.expiresAt === value.createdAt + UNLOCK_DURATION_MS &&
       at < value.expiresAt &&
-      at - value.lastActivityAt < idleMinutes() * 60 * 1000
+      (idleMinutes() <= 0 || at - value.lastActivityAt < idleMinutes() * 60 * 1000)
     )
   }
   function persist(value) {

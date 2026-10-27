@@ -241,7 +241,7 @@ app
       const settings = JSON.parse(await readFile(securitySettingsFile, 'utf8'))
       if (
         settings.unlockSessionPolicy === 1 &&
-        [5, 15, 30, 60, IDLE_LOCK_MINUTES].includes(settings.idleLockMinutes)
+        [0, 5, 15, 30, 60, IDLE_LOCK_MINUTES].includes(settings.idleLockMinutes)
       )
         idleLockMinutes = settings.idleLockMinutes
     } catch {
@@ -252,7 +252,8 @@ app
     idleLockTimer = setInterval(checkUnlockSession, 30000)
     ipcMain.handle('security:state', () => ({ idleLockMinutes }))
     ipcMain.handle('security:setIdle', async (_, minutes) => {
-      if (![5, 15, 30, 60, IDLE_LOCK_MINUTES].includes(minutes)) throw new Error('闲置锁定时间无效')
+      if (![0, 5, 15, 30, 60, IDLE_LOCK_MINUTES].includes(minutes))
+        throw new Error('闲置锁定时间无效')
       await writeFile(
         securitySettingsFile,
         JSON.stringify({ idleLockMinutes: minutes, unlockSessionPolicy: 1 }),
@@ -440,7 +441,8 @@ app
       const fingerprints = JSON.stringify(records.map((record) => [record.id, record.password]))
       const leaked = await checkPasswordBreaches(records)
       if (!isVaultUnlocked() || getVaultRevision() !== revision) throw new Error('密码库会话已变化')
-      if (fingerprints !== JSON.stringify(listApps().map((record) => [record.id, record.password]))) throw new Error('密码已变化，请重新检查')
+      if (fingerprints !== JSON.stringify(listApps().map((record) => [record.id, record.password])))
+        throw new Error('密码已变化，请重新检查')
       return { leaked, checkedAt: new Date().toISOString() }
     })
     ipcMain.handle('app:openWebsite', (_, value) => {

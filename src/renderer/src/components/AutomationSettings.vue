@@ -29,6 +29,7 @@
         @change="run(() => api.setIdleLock(Number(idle)))"
       >
         <option :value="4320">闲置 3 天</option>
+        <option :value="0">无限制</option>
         <option v-for="minutes in [5, 15, 30, 60]" :key="minutes" :value="minutes">
           闲置 {{ minutes }} 分钟
         </option>
