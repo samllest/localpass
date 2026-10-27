@@ -144,6 +144,7 @@
                   :class="{
                     selected: batchMode ? selectedIds.has(group.key) : selectedKey === group.key
                   }"
+                  @contextmenu.prevent="groupMenu(group)"
                 >
                   <input
                     v-if="batchMode"
@@ -200,6 +201,7 @@
             @edit="openEdit"
             @delete="requestDelete([$event])"
             @add="openAdd(selectedGroup)"
+            @changed="refreshApps"
           />
           <div v-else class="detail-placeholder">
             <div class="empty-symbol"><UiIcon :name="batchMode ? 'shield-check' : 'key'" /></div>
@@ -233,6 +235,7 @@
               </div>
               <h2 class="section-title">偏好设置</h2>
               <section class="settings-card">
+                <StartupSetting />
                 <div class="preference-row">
                   <div>
                     <strong>外观</strong>
@@ -293,6 +296,7 @@
                 </div>
               </section>
               <h2 class="section-title">密码数据</h2>
+              <AutomationSettings @changed="refreshApps" />
               <section class="settings-card">
                 <div class="preference-row">
                   <div>
@@ -362,7 +366,7 @@
         <p>
           即将删除
           {{ pendingDelete.length }}
-          个账号及其全部历史版本。此操作无法撤销，网站上的账号不会受影响。
+          个账号，放入回收站并保留全部历史 30 天。网站上的账号不会受影响。
         </p>
         <p class="delete-preview">
           {{
@@ -458,7 +462,9 @@ import VaultDialog from './VaultDialog.vue'
 import AppUpdate from './AppUpdate.vue'
 import ExtensionUpdate from './ExtensionUpdate.vue'
 import PasswordCheckup from './PasswordCheckup.vue'
-import { filterGroups, groupAccounts, groupKey, recordId } from '../utils/vault'
+import AutomationSettings from './AutomationSettings.vue'
+import StartupSetting from './StartupSetting.vue'
+import { filterGroups, groupAccounts, groupKey, recordId, recordWebsiteUrl } from '../utils/vault'
 
 const navigation = [
   { id: 'passwords', label: '密码', icon: 'key' },
@@ -468,7 +474,8 @@ const navigation = [
 const categories = [
   { id: 'all', label: '全部' },
   { id: 'web', label: '网站' },
-  { id: 'app', label: '应用' }
+  { id: 'app', label: '应用' },
+  { id: 'favorite', label: '收藏' }
 ]
 const apps = ref([])
 const page = ref('passwords')
@@ -677,6 +684,20 @@ function openEdit(account) {
   editingItem.value = account
   addDefaults.value = null
   modalVisible.value = true
+}
+async function groupMenu(group) {
+  try {
+    const action = await window.localpass.contextMenu({
+      group: true,
+      website: group.category === 'web'
+    })
+    if (action === 'open') await window.localpass.openWebsite(recordWebsiteUrl(group))
+    if (action === 'url') await onCopy(group.identity)
+    if (action === 'view') selectGroup(group)
+    if (action === 'add') openAdd(group)
+  } catch (error) {
+    showToast(error.message, 'error')
+  }
 }
 async function onSaved(payload) {
   modalVisible.value = false

@@ -91,3 +91,14 @@ button:disabled {
   opacity: 0.65;
   cursor: wait;
 }
+.popup-account {
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--line);
+}
+details {
+  margin-top: var(--space-lg);
+}
+summary {
+  cursor: pointer;
+  color: var(--muted);
+}

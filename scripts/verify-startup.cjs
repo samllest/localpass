@@ -25,18 +25,20 @@ if (process.versions.electron) {
         await new Promise((resolve) => occupied.close(resolve))
         const startup = bridge.initBridgeServer(null, {
           port,
+          secret: 'a'.repeat(64),
           extensionStatus: (version) => ({ ok: true, version: '1.3.7', reported: version })
         })
         assert.equal(bridge.initBridgeServer(null, { port }), startup)
         await startup
-        const extensionState = await fetch(
-          `http://127.0.0.1:${port}/extension-status?version=1.3.5`
-        )
+        const headers = { Authorization: `Bearer ${'a'.repeat(64)}`, 'Content-Type': 'application/json' }
+        const trustedFetch = (url, options = {}) => fetch(url, { ...options, headers })
+        const extensionState = await trustedFetch(`http://127.0.0.1:${port}/extension-status?version=1.3.5`)
         const metadata = await extensionState.json()
         assert.equal(typeof metadata.instanceId, 'string')
         assert.equal(metadata.unlocked, false)
         delete metadata.instanceId
         delete metadata.unlocked
+        delete metadata.revision
         assert.deepEqual(metadata, {
           ok: true,
           version: '1.3.7',
@@ -46,7 +48,7 @@ if (process.versions.electron) {
         console.log(
           'PASS extension version checks work while locked without retrieving credentials'
         )
-        const response = await fetch(`http://127.0.0.1:${port}/lookup?identity=fixture.example`)
+        const response = await trustedFetch(`http://127.0.0.1:${port}/lookup?identity=fixture.example`)
         assert.equal(response.status, 423)
         assert.deepEqual((await response.json()).accounts, [])
         const db = await import(pathToFileURL(path.join(__dirname, '../src/main/db.js')))
@@ -54,21 +56,23 @@ if (process.versions.electron) {
         db.setMasterPassword('Synthetic!Startup123', 'fixture-salt')
         const hidden = new BrowserWindow({ show: false })
         hidden.hide()
-        const captured = await fetch(`http://127.0.0.1:${port}/capture`, {
+        const revision = (await trustedFetch(`http://127.0.0.1:${port}/extension-status`).then(response => response.json())).revision
+        const captured = await trustedFetch(`http://127.0.0.1:${port}/capture`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             page_url: 'https://fixture.example/login',
+            vault_revision: revision,
             username: 'fixture',
             password: 'Synthetic!Capture123'
           })
         })
         assert.equal(captured.status, 200)
-        const lookup = await fetch(`http://127.0.0.1:${port}/lookup?identity=fixture.example`)
+        const lookup = await trustedFetch(`http://127.0.0.1:${port}/lookup?identity=fixture.example`)
         assert.equal((await lookup.json()).accounts[0].password, 'Synthetic!Capture123')
         db.closeVault()
         assert.equal(
-          (await fetch(`http://127.0.0.1:${port}/lookup?identity=fixture.example`)).status,
+          (await trustedFetch(`http://127.0.0.1:${port}/lookup?identity=fixture.example`)).status,
           423
         )
         hidden.destroy()
@@ -111,6 +115,7 @@ if (process.versions.electron) {
     app.on('second-instance', () => process.send?.({ type: 'second-instance' }))
     app.on('browser-window-created', (_event, window) => {
       testWindow = window
+      window.webContents.on('console-message', (_event, level, message) => { if (level >= 2) console.error('[Synthetic renderer]', message) })
       window.show = () => {
         showCalls++
       }
@@ -188,10 +193,70 @@ if (process.versions.electron) {
           )
           assert.ok(ui.text.includes('恢复关闭提示'))
           assert.equal(ui.overflow, false)
+          const startupState = await testWindow.webContents.executeJavaScript(
+            'window.localpass.getStartupState()'
+          )
+          assert.equal(startupState.supported, false)
+          assert.ok(ui.text.includes('开机自启'))
+          assert.equal(await testWindow.webContents.executeJavaScript(
+            'document.querySelector(\'[role="switch"][aria-labelledby="startup-label"]\').disabled'
+          ), true)
+          // Exercise real preload/UI without adding this test's Electron binary to Windows startup.
+          const { ipcMain } = require('electron')
+          ipcMain.removeHandler('startup:state')
+          ipcMain.removeHandler('startup:setEnabled')
+          let startupEnabled = false
+          let startupFailure = false
+          ipcMain.handle('startup:state', () => ({ supported: true, enabled: startupEnabled }))
+          ipcMain.handle('startup:setEnabled', (_event, enabled) => {
+            if (startupFailure) throw new Error('Synthetic startup write failure')
+            startupEnabled = enabled
+            return { supported: true, enabled }
+          })
+          const startupToggle = '[role="switch"][aria-labelledby="startup-label"]'
+          await testWindow.webContents.executeJavaScript('window.dispatchEvent(new Event("focus"))')
+          await pause()
+          for (const enabled of [true, false]) {
+            await testWindow.webContents.executeJavaScript(`document.querySelector('${startupToggle}').click()`)
+            await pause()
+            assert.equal(startupEnabled, enabled)
+            assert.equal(await testWindow.webContents.executeJavaScript(
+              `document.querySelector('${startupToggle}').getAttribute('aria-checked')`
+            ), String(enabled))
+          }
+          startupFailure = true
+          await testWindow.webContents.executeJavaScript(`document.querySelector('${startupToggle}').click()`)
+          await pause()
+          assert.equal(startupEnabled, false)
+          assert.ok(await testWindow.webContents.executeJavaScript('document.body.innerText.includes("Synthetic startup write failure")'))
+          startupFailure = false
+          startupEnabled = true
+          await testWindow.webContents.executeJavaScript('window.dispatchEvent(new Event("focus"))')
+          await pause()
+          assert.equal(await testWindow.webContents.executeJavaScript(
+            `document.querySelector('${startupToggle}').getAttribute('aria-checked')`
+          ), 'true')
+          BrowserWindow.prototype.showInactive.call(testWindow)
+          await testWindow.webContents.executeJavaScript(`document.querySelector('${startupToggle}').scrollIntoView({block: 'center'})`)
+          await pause()
+          fs.writeFileSync(path.join(__dirname, '../out/startup-setting.png'), (await testWindow.webContents.capturePage()).toPNG())
+          BrowserWindow.prototype.hide.call(testWindow)
+          console.log('PASS startup setting toggles through preload, reports failures and refreshes OS state without changing Windows startup')
           const extensionState = await testWindow.webContents.executeJavaScript(
             'window.localpass.getExtensionUpdateState()'
           )
-          assert.equal(extensionState.version, '1.3.7')
+          assert.equal(extensionState.version, JSON.parse(fs.readFileSync(path.join(__dirname, '../chrome-extension/manifest.json'), 'utf8')).version)
+          assert.ok(ui.text.includes('自动备份'))
+          assert.ok(ui.text.includes('回收站'))
+          assert.ok(ui.text.includes('修改主密码'))
+          assert.equal((await testWindow.webContents.executeJavaScript('window.localpass.getSecurityState()')).idleLockMinutes, 4320)
+          assert.equal(await testWindow.webContents.executeJavaScript(`document.querySelector('[aria-label="闲置锁定"]').value`), '4320')
+          await testWindow.webContents.executeJavaScript(`document.querySelector('[aria-label="闲置锁定"]').scrollIntoView({block:'center'})`)
+          BrowserWindow.prototype.showInactive.call(testWindow)
+          await pause()
+          fs.writeFileSync(path.join(__dirname, '../out/unlock-session-settings.png'), (await testWindow.webContents.capturePage()).toPNG())
+          BrowserWindow.prototype.hide.call(testWindow)
+          assert.equal(fs.readFileSync(path.join(extensionState.folder, 'bridge-config.js'), 'utf8').includes("LP_BRIDGE_TOKEN = ''"), false)
           assert.ok(ui.text.includes('绑定已有扩展目录'))
           assert.ok(ui.text.includes('每 15 分钟自动下载新版'))
           assert.ok(fs.existsSync(path.join(extensionState.folder, 'manifest.json')))
@@ -214,6 +279,53 @@ if (process.versions.electron) {
           console.log(
             'PASS extension update settings use a stable directory through the real preload and renderer'
           )
+          await testWindow.webContents.executeJavaScript(`(async () => {
+            await window.localpass.createApp({ identity:'automation.test', display_name:'自动化验证', username:'fixture', password:'Synthetic!Local123', favorite: true, notes: 'test note', tags: 'work', totp_secret:'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })
+            const records = await window.localpass.listApps()
+            await window.localpass.deleteApp(records[0].id)
+            const button = [...document.querySelectorAll('button')].find(b => b.textContent.includes('查看回收站'))
+            button.click()
+          })()`)
+          await pause()
+          assert.ok(await testWindow.webContents.executeJavaScript(`document.querySelector('dialog[open]').innerText.includes('自动化验证')`))
+          console.log('UI: trash opened')
+          await testWindow.webContents.executeJavaScript(`document.querySelector('dialog[open] .button-outline').click()`)
+          await pause()
+          assert.equal((await testWindow.webContents.executeJavaScript('window.localpass.listTrash()')).length, 0)
+          console.log('UI: trash restored')
+          await testWindow.webContents.executeJavaScript(`document.querySelector('dialog[open] [aria-label="关闭对话框"]')?.click()`)
+          await testWindow.webContents.executeJavaScript(`document.querySelectorAll('.manager-nav')[0].click()`)
+          await pause()
+          assert.ok(await testWindow.webContents.executeJavaScript(`document.body.innerText.includes('自动化验证')`))
+          console.log('UI: password list opened')
+          await testWindow.webContents.executeJavaScript(`document.querySelector('.password-row').click()`)
+          await pause()
+          assert.ok(await testWindow.webContents.executeJavaScript(`!!document.querySelector('.account-section .text-button')`), 'account editor is available after selecting the restored website')
+          await testWindow.webContents.executeJavaScript(`document.querySelector('.account-section .text-button').click()`)
+          await pause()
+          const dialogBounds = await testWindow.webContents.executeJavaScript(`(() => { const d = document.querySelector('dialog[open]'); const r = d.getBoundingClientRect(); return { top:r.top, bottom:r.bottom, overflow:d.scrollHeight > d.clientHeight, totp:!!document.querySelector('#account-totp') } })()`)
+          assert.ok(dialogBounds.top >= 0 && dialogBounds.bottom <= 900)
+          assert.equal(dialogBounds.totp, true)
+          console.log('UI: account editor opened')
+          BrowserWindow.prototype.showInactive.call(testWindow)
+          const uiScreenshot = path.join(__dirname, '../out/automation-edit-dialog.png')
+          fs.writeFileSync(uiScreenshot, (await testWindow.webContents.capturePage()).toPNG())
+          await testWindow.webContents.executeJavaScript(`document.querySelector('dialog[open] [aria-label="关闭对话框"]').click()`)
+          require('electron').powerMonitor.emit('lock-screen')
+          await pause()
+          assert.equal((await testWindow.webContents.executeJavaScript('window.localpass.getAuthSession()')).unlocked, true)
+          await testWindow.webContents.executeJavaScript('window.localpass.clearMasterKey()')
+          await pause()
+          assert.equal((await testWindow.webContents.executeJavaScript('window.localpass.getAuthSession()')).unlocked, false)
+          assert.ok(await testWindow.webContents.executeJavaScript(`!!document.querySelector('.unlock-form')`))
+          await testWindow.webContents.executeJavaScript(`(async () => {
+            for (const [selector, value] of [['#username','startup-fixture'],['#master-pwd','Synthetic!Startup123']]) { const input = document.querySelector(selector); input.value=value; input.dispatchEvent(new Event('input', {bubbles:true})) }
+            document.querySelector('.unlock-form').requestSubmit()
+          })()`)
+          await pause()
+          await testWindow.webContents.executeJavaScript(`document.querySelectorAll('.manager-nav')[2].click()`)
+          await pause()
+          console.log('PASS real settings default to 3 day inactivity; Windows screen lock preserves the session and manual lock revokes it')
           const updateState = await testWindow.webContents.executeJavaScript(
             'window.localpass.getUpdateState()'
           )

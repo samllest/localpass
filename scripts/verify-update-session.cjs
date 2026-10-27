@@ -8,6 +8,10 @@ if (process.versions.electron) {
   const { app, dialog } = require('electron')
   const profile = process.env.LOCALPASS_SESSION_PROFILE
   const mode = process.env.LOCALPASS_SESSION_MODE
+  if (mode === 'idleExpired') {
+    const realNow = Date.now
+    Date.now = () => realNow() + 3 * 24 * 60 * 60 * 1000
+  }
   app.setPath('userData', profile)
   app.getAppPath = () => profile
   dialog.showMessageBox = async () => ({ response: 0 })
@@ -32,6 +36,7 @@ if (process.versions.electron) {
             "window.localpass.createApp({identity:'fixture.example',display_name:'Fixture',username:'fixture',password:'Synthetic!Stored456'})"
           )
           assert.ok(fs.existsSync(path.join(profile, 'update-session.bin')))
+          assert.ok(fs.existsSync(path.join(profile, 'unlock-session.bin')))
           assert.equal(
             fs
               .readFileSync(path.join(profile, 'update-session.bin'))
@@ -39,7 +44,7 @@ if (process.versions.electron) {
             false
           )
           app.exit(0) // Simulate installer termination, which bypasses ordinary quit.
-        } else if (mode === 'restore' || mode === 'graceful') {
+        } else if (['restore', 'graceful', 'ordinary'].includes(mode)) {
           assert.equal((await run('window.localpass.getAuthSession()')).unlocked, true)
           assert.ok(await run("Boolean(document.querySelector('.manager-nav'))"))
           const apps = await run('window.localpass.listApps()')
@@ -60,6 +65,7 @@ if (process.versions.electron) {
           )
           await run('window.localpass.clearMasterKey()')
           assert.equal(fs.existsSync(path.join(profile, 'update-session.bin')), false)
+          assert.equal(fs.existsSync(path.join(profile, 'unlock-session.bin')), false)
           assert.equal((await run('window.localpass.getAuthSession()')).unlocked, false)
           app.quit()
         }
@@ -84,7 +90,7 @@ if (process.versions.electron) {
     recursive: true
   })
   try {
-    for (const mode of ['seed', 'graceful', 'restore', 'ordinary']) {
+    for (const mode of ['seed', 'graceful', 'restore', 'ordinary', 'idleExpired', 'locked']) {
       if (mode === 'graceful')
         fs.writeFileSync(path.join(profile, 'update-resume.marker'), 'installer')
       const result = spawnSync(require('electron'), [__filename], {

@@ -1,10 +1,39 @@
-/* global chrome */
+/* global chrome, importScripts */
+
+try {
+  importScripts('bridge-config.js')
+} catch {
+  /* An unconfigured installation cannot access the vault. */
+}
+
+async function bridgeFetch(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: { ...options.headers, Authorization: `Bearer ${globalThis.LP_BRIDGE_TOKEN || ''}` },
+    redirect: 'error',
+    cache: 'no-store'
+  })
+}
 
 const pendingCaptures = {}
 const pendingLookups = new Map()
 const captureStatusOwners = new Map()
 const CAPTURE_CONFIRM_DELAY_MS = 1800
 const MAX_INLINE_ICON_URL_LENGTH = 256 * 1024
+// Same known Chromium placeholder as src/shared/site-metadata.js. A successful
+// favicon response can still contain this image; never persist it as site data.
+const DEFAULT_BROWSER_ICON =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABRElEQVR4AeyX4REBMRCFUQEdKIEO6EAJdKADOjAqMDqgAjqgAzqgA967Sdzlstxm5P6t2U1Osnn5rLncXq8jf4YYPsEf8JfSd4jjOnR6kwAocoHEBN6Ha22OQEJzPS51JgFssJQb79EP4N0Gx3Rhd7TcPAlCAphBiLZG84RrbYrAZAgJADqFUay4UDaMT4b4BaDcNwhLhsgNQJokiDYAkiDaAlBD5ADwdwpvQW5c9frfwcOqOt/JAbB1ijf00qnJcQ83QkxgOQB4XhDCZyLYoPaFB1wwlAOAgks0TacmQmLLBRArK0cMwDJgGbAMWAYsA5YBKQO+sIiKB+UTVgrzFVE0JwFcXRRf0b4udDGajj9k5QKPrv90EsACs8wCXzZZz0l1XsoY37CpRU1WTpAvTQJgJTtGyAH+t0GAG5/RU5PauCztDQAA///3JTG8AAAABklEQVQDAGm4Uc19dK5XAAAAAElFTkSuQmCC'
+const iconAttempts = new Map()
+let iconScanRunning = false
+let iconDocumentPromise = null
+
+function bytesBase64(bytes) {
+  let text = ''
+  for (let start = 0; start < bytes.length; start += 8192)
+    text += String.fromCharCode(...bytes.subarray(start, start + 8192))
+  return btoa(text)
+}
 
 let desktopInstance = null
 let desktopUnlocked = false
@@ -15,6 +44,11 @@ async function repairPage(tabId) {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
       files: ['content.js']
+    })
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ['network-observer.js'],
+      world: 'MAIN'
     })
   } catch {
     /* Browser settings, closed tabs and restricted pages are skipped. */
@@ -36,7 +70,7 @@ async function checkExtensionUpdate() {
   if (Object.keys(pendingCaptures).length || pendingLookups.size) return
   try {
     const current = chrome.runtime.getManifest().version
-    const response = await fetch(
+    const response = await bridgeFetch(
       `http://127.0.0.1:35320/extension-status?version=${encodeURIComponent(current)}`,
       {
         cache: 'no-store',
@@ -53,6 +87,7 @@ async function checkExtensionUpdate() {
       (!desktopUnlocked || desktopInstance !== result.instanceId)
     desktopUnlocked = Boolean(result.unlocked)
     desktopInstance = result.instanceId
+    if (desktopUnlocked) void refreshMissingIcons().catch(() => {})
     if (recovered) {
       await repairOpenPages()
       const tabs = (await chrome.tabs.query?.({ active: true })) || []
@@ -119,8 +154,74 @@ function sameRequestUrl(left, right) {
   }
 }
 
-async function loadSiteIcon(value) {
+async function rasterizeIcon(blob) {
   let bitmap
+  try {
+    bitmap = await createImageBitmap(blob, { resizeWidth: 32, resizeHeight: 32 })
+    const canvas = new OffscreenCanvas(32, 32)
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, 32, 32)
+    const png = await canvas.convertToBlob({ type: 'image/png' })
+    if (png.size > 16 * 1024) return ''
+    return `data:image/png;base64,${btoa(String.fromCharCode(...new Uint8Array(await png.arrayBuffer())))}`
+  } catch {
+    const data = `data:${blob.type};base64,${bytesBase64(new Uint8Array(await blob.arrayBuffer()))}`
+    // Integration fixtures also exercise the actual image decoder in Chromium.
+    if (typeof document !== 'undefined') {
+      const image = new Image()
+      try {
+        image.src = data
+        await image.decode()
+        const canvas = document.createElement('canvas')
+        canvas.width = canvas.height = 32
+        canvas.getContext('2d').drawImage(image, 0, 0, 32, 32)
+        const icon = canvas.toDataURL('image/png')
+        return icon.length <= 24576 ? icon : ''
+      } catch {
+        return ''
+      }
+    }
+    if (!chrome.offscreen) return ''
+    try {
+      if (!iconDocumentPromise)
+        iconDocumentPromise = (async () => {
+          if (!(await chrome.offscreen.hasDocument()))
+            await chrome.offscreen.createDocument({
+              url: 'icon-offscreen.html',
+              reasons: ['BLOBS'],
+              justification: 'Convert website SVG and ICO icons to local PNG images.'
+            })
+        })().finally(() => {
+          iconDocumentPromise = null
+        })
+      await iconDocumentPromise
+      return (await chrome.runtime.sendMessage({ type: 'LP_RASTERIZE_ICON', data }))?.icon || ''
+    } catch {
+      return ''
+    }
+  } finally {
+    bitmap?.close()
+  }
+}
+
+async function readBoundedResponse(response, maxBytes) {
+  const reader = response.body?.getReader()
+  if (!reader) return null
+  const chunks = []
+  let size = 0
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    size += value.length
+    if (size > maxBytes) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  return new Blob(chunks)
+}
+
+async function loadSiteIcon(value, pageUrl = '', timeout = 4000) {
   try {
     const url = new URL(value)
     const nativeIcon =
@@ -137,44 +238,75 @@ async function loadSiteIcon(value) {
     )
       return ''
     const response = await fetch(url.href, {
-      credentials: 'omit',
-      redirect: 'error',
-      signal: AbortSignal.timeout(2000)
+      credentials: sameOrigin(url.href, pageUrl) ? 'include' : 'omit',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(timeout)
     })
-    if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) return ''
-    const reader = response.body.getReader()
-    const chunks = []
-    let size = 0
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      size += value.length
-      if (size > (inlineIcon ? 192 : 128) * 1024) {
-        await reader.cancel()
-        return ''
-      }
-      chunks.push(value)
-    }
-    const blob = new Blob(chunks, { type: response.headers.get('content-type') })
-    bitmap = await createImageBitmap(blob, { resizeWidth: 32, resizeHeight: 32 })
-    const canvas = new OffscreenCanvas(32, 32)
-    canvas.getContext('2d').drawImage(bitmap, 0, 0, 32, 32)
-    const png = await canvas.convertToBlob({ type: 'image/png' })
-    if (png.size > 16 * 1024) return ''
-    return `data:image/png;base64,${btoa(String.fromCharCode(...new Uint8Array(await png.arrayBuffer())))}`
+    if (!response.ok) return ''
+    const raw = await readBoundedResponse(response, inlineIcon ? 192 * 1024 : 512 * 1024)
+    if (!raw) return ''
+    const prefix = new Uint8Array(await raw.slice(0, 512).arrayBuffer())
+    const text = new TextDecoder().decode(prefix).trim()
+    // Some servers label icons as application/octet-stream. Sniff only known
+    // image signatures; an SPA's HTML fallback must never be treated as an icon.
+    let type = (response.headers.get('content-type') || '').split(';')[0].toLowerCase()
+    if (/^<!doctype\s+html|^<html/i.test(text)) return ''
+    if (prefix[0] === 137 && prefix[1] === 80) type = 'image/png'
+    else if (prefix[0] === 0 && prefix[1] === 0 && prefix[2] === 1 && prefix[3] === 0)
+      type = 'image/x-icon'
+    else if (/^(?:<\?xml[^>]*>\s*)?<svg[\s>]/i.test(text)) type = 'image/svg+xml'
+    if (!type.startsWith('image/')) return ''
+    if (
+      `data:${type};base64,${bytesBase64(new Uint8Array(await raw.arrayBuffer()))}` ===
+      DEFAULT_BROWSER_ICON
+    )
+      return ''
+    const icon = await rasterizeIcon(new Blob([raw], { type }))
+    return icon === DEFAULT_BROWSER_ICON ? '' : icon
   } catch {
     return ''
-  } finally {
-    bitmap?.close()
   }
 }
 
-async function enrichSite(tabId, payload) {
+function iconUrls(html, baseUrl) {
+  const urls = []
+  for (const tag of html.match(/<link\b[^>]*>/gi) || []) {
+    const attrs = {}
+    for (const match of tag.matchAll(/([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g))
+      attrs[match[1].toLowerCase()] = (match[2] ?? match[3] ?? match[4]).replace(/&amp;/g, '&')
+    if (!/(?:^|\s)(?:icon|apple-touch-icon)(?:\s|$)/i.test(attrs.rel || '')) continue
+    try {
+      const url = new URL(attrs.href, baseUrl)
+      if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password)
+        urls.push(url.href)
+    } catch {
+      /* Malformed links are ignored. */
+    }
+  }
+  return [...new Set(urls)].slice(0, 8)
+}
+
+async function discoverIconUrls(pageUrl) {
+  try {
+    const response = await fetch(pageUrl, {
+      credentials: 'omit',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(4000)
+    })
+    if (!response.ok || !sameOrigin(response.url || pageUrl, pageUrl)) return []
+    const body = await readBoundedResponse(response, 512 * 1024)
+    return body ? iconUrls(await body.text(), response.url || pageUrl) : []
+  } catch {
+    return []
+  }
+}
+
+async function enrichSite(tabId, payload, { quick = false } = {}) {
   const pageUrl = new URL(payload.page_url)
   const metadata = { ...payload, identity: pageUrl.host, site_url: pageUrl.origin }
   let tab
   try {
-    tab = await chrome.tabs.get(tabId)
+    if (Number.isInteger(tabId)) tab = await chrome.tabs.get(tabId)
   } catch {
     /* Tab may have closed after login. */
   }
@@ -196,20 +328,127 @@ async function enrichSite(tabId, payload) {
     ...new Set(
       [
         payload.icon_url?.startsWith('data:') ? payload.icon_url : '',
-        browserIcon,
+        ...(payload.icon_urls || []).slice(0, 8),
         payload.icon_url,
         tab && sameOrigin(tab.url, payload.page_url) ? tab.favIconUrl : '',
-        `${pageUrl.origin}/favicon.ico`
+        browserIcon
       ].filter(Boolean)
     )
   ]
   metadata.icon_data = ''
-  for (const url of candidates) {
-    metadata.icon_data = await loadSiteIcon(url)
+  for (const url of quick ? candidates.slice(0, 3) : candidates) {
+    metadata.icon_data = await loadSiteIcon(url, pageUrl.href, quick ? 1000 : 4000)
     if (metadata.icon_data) break
   }
+  if (
+    !quick &&
+    !metadata.icon_data &&
+    tab &&
+    sameOrigin(tab.url, payload.page_url) &&
+    chrome.tabs.sendMessage
+  ) {
+    try {
+      const result = await chrome.tabs.sendMessage(
+        tabId,
+        { type: 'LP_COLLECT_SITE_ICON' },
+        { frameId: 0 }
+      )
+      if (
+        /^data:image\/png;base64,iVBORw0KGgo/.test(result?.icon || '') &&
+        result.icon !== DEFAULT_BROWSER_ICON &&
+        result.icon.length <= 24576
+      )
+        metadata.icon_data = result.icon
+    } catch {
+      /* Closed or restricted pages use the remaining sources. */
+    }
+  }
+  if (!quick && !metadata.icon_data) {
+    const discovered = await discoverIconUrls(pageUrl.origin)
+    for (const url of [
+      ...discovered,
+      `${pageUrl.origin}/favicon.png`,
+      `${pageUrl.origin}/favicon.ico`
+    ]) {
+      if (candidates.includes(url)) continue
+      metadata.icon_data = await loadSiteIcon(url, pageUrl.href)
+      if (metadata.icon_data) break
+    }
+  }
   delete metadata.icon_url
+  delete metadata.icon_urls
   return metadata
+}
+
+async function refreshMissingIcons(visited, tabId) {
+  if (iconScanRunning) return
+  iconScanRunning = true
+  try {
+    const response = await bridgeFetch('http://127.0.0.1:35320/site-icons', {
+      signal: AbortSignal.timeout(3000),
+      cache: 'no-store'
+    })
+    if (!response.ok) return
+    const { ok, revision, sites } = await response.json()
+    if (!ok || !revision || !Array.isArray(sites)) return
+    const tabs = (await chrome.tabs.query?.({ url: ['http://*/*', 'https://*/*'] })) || []
+    let processed = 0
+    for (const site of sites) {
+      const key = `${revision}:${site.id}`
+      const attemptKey = `site-icon-attempt:${key}`
+      const previous =
+        iconAttempts.get(key) || (await chrome.storage.session?.get?.(attemptKey))?.[attemptKey]
+      const matchingVisit =
+        visited &&
+        new URL(visited.page_url).host === site.identity &&
+        (!site.project_name ||
+          site.project_name.toLowerCase() === (visited.project_name || '').toLowerCase())
+      if (visited && !matchingVisit) continue
+      if (previous?.next > Date.now() && (!matchingVisit || Date.now() - previous.at < 60000))
+        continue
+      if (++processed > 3) break
+      let tab = tabs.find((entry) => sameOrigin(entry.url, site.site_url))
+      let metadata = matchingVisit ? visited : { page_url: site.site_url }
+      // Read the live page's links before falling back to a root-page request.
+      if (!matchingVisit && tab && chrome.tabs.sendMessage) {
+        try {
+          const live = await chrome.tabs.sendMessage(
+            tab.id,
+            { type: 'LP_SITE_METADATA' },
+            { frameId: 0 }
+          )
+          if (live && sameOrigin(live.page_url, site.site_url)) {
+            if (
+              !site.project_name ||
+              site.project_name.toLowerCase() === (live.project_name || '').toLowerCase()
+            )
+              metadata = live
+            else tab = null
+          }
+        } catch {
+          /* Use browser cache and server discovery. */
+        }
+      }
+      const result = await enrichSite(matchingVisit ? tabId : tab?.id, metadata)
+      if (result.icon_data) {
+        const saved = await bridgeFetch('http://127.0.0.1:35320/site-icons', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...site, revision, icon_data: result.icon_data }),
+          signal: AbortSignal.timeout(3000)
+        })
+        if (!saved.ok) break
+      }
+      const failures = result.icon_data ? 0 : (previous?.failures || 0) + 1
+      const delay = [60000, 300000, 900000, 3600000][Math.min(failures, 3)]
+      const attempt = { failures, at: Date.now(), next: Date.now() + delay }
+      iconAttempts.set(key, attempt)
+      await chrome.storage.session?.set?.({ [attemptKey]: attempt }).catch(() => {})
+      if (iconAttempts.size > 1000) iconAttempts.delete(iconAttempts.keys().next().value)
+    }
+  } finally {
+    iconScanRunning = false
+  }
 }
 
 async function sendCapture(tabId, capture) {
@@ -218,13 +457,20 @@ async function sendCapture(tabId, capture) {
   capture.sending = true
   captureStatus(tabId, capture, 'saving')
   try {
-    const payload = await enrichSite(tabId, capture.payload)
+    await capture.usernameReady
+    await capture.sessionReady
+    if (capture.sessionRejected) {
+      captureStatus(tabId, capture, 'locked')
+      clearPendingCapture(tabId, capture)
+      return
+    }
+    const payload = await enrichSite(tabId, capture.payload, { quick: true })
     // Login failure or a later attempt may arrive while the icon is loading.
     if (pendingCaptures[tabId] !== capture || capture.cancelled) return
     capture.sent = true
     clearPendingCapture(tabId, capture)
 
-    const response = await fetch('http://127.0.0.1:35320/capture', {
+    const response = await bridgeFetch('http://127.0.0.1:35320/capture', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -256,7 +502,7 @@ async function lookupAccounts(identity, metadata = {}, signal) {
     if (metadata[key]) url.searchParams.set(key, String(metadata[key]).slice(0, 256))
   }
 
-  const response = await fetch(url, { signal })
+  const response = await bridgeFetch(url, { signal })
   const data = await response.json()
   if (!response.ok || !data.ok) {
     throw new Error(data.error || 'LocalPass lookup failed')
@@ -265,6 +511,55 @@ async function lookupAccounts(identity, metadata = {}, signal) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'LP_RASTERIZE_ICON') return false
+  if (message.type === 'LP_ACCOUNT_USED' && sender.tab && message.selectionToken) {
+    try {
+      const url = new URL(sender.url)
+      if (!['http:', 'https:'].includes(url.protocol)) return false
+      void bridgeFetch('http://127.0.0.1:35320/activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identity: url.host, selection_token: message.selectionToken }),
+        signal: AbortSignal.timeout(3000)
+      }).catch(() => {})
+    } catch {
+      /* Closed or restricted pages cannot extend the session. */
+    }
+    return false
+  }
+  if (message.type === 'LP_SPLIT_USERNAME' && sender.tab) {
+    const url = new URL(sender.url)
+    const key = `split-login:${sender.tab.id}:${sender.frameId || 0}`
+    void (async () => {
+      const response = await bridgeFetch('http://127.0.0.1:35320/extension-status', {
+        signal: AbortSignal.timeout(3000)
+      })
+      const status = await response.json()
+      if (!response.ok || !status.unlocked || !status.revision) return
+      await chrome.storage.session.set({
+        [key]: {
+          username: String(message.username || '').slice(0, 512),
+          kind: message.kind || 'login',
+          origin: url.origin,
+          revision: status.revision,
+          at: Date.now()
+        }
+      })
+    })().catch(() => {})
+    return false
+  }
+  if (message.type === 'LP_SITE_VISITED' && sender.tab && (sender.frameId ?? 0) === 0) {
+    const pageUrl = sender.url || message.payload?.page_url
+    try {
+      if (!['http:', 'https:'].includes(new URL(pageUrl).protocol)) return false
+      void refreshMissingIcons({ ...message.payload, page_url: pageUrl }, sender.tab.id).catch(
+        () => {}
+      )
+    } catch {
+      /* Ignore invalid sender URLs. */
+    }
+    return false
+  }
   const lookupKey = JSON.stringify([
     sender.tab?.id,
     sender.frameId,
@@ -296,8 +591,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'LP_LOGIN_SUBMITTED' && sender.tab) {
+    let senderUrl
+    try {
+      senderUrl = new URL(sender.url)
+      if (!['http:', 'https:'].includes(senderUrl.protocol)) return false
+    } catch {
+      return false
+    }
     const capture = {
-      payload: message.payload,
+      payload: { ...message.payload, page_url: sender.url, identity: senderUrl.host },
       attemptId: message.attemptId,
       frameId: sender.frameId ?? 0,
       documentId: sender.documentId,
@@ -308,6 +610,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       statusId: Symbol()
     }
     pendingCaptures[sender.tab.id] = capture
+    capture.sessionReady = (async () => {
+      const response = await bridgeFetch('http://127.0.0.1:35320/extension-status', {
+        signal: AbortSignal.timeout(3000)
+      })
+      const status = await response.json()
+      if (!response.ok || status.unlocked === false) capture.sessionRejected = true
+      capture.payload.vault_revision = status.revision
+    })().catch(() => {
+      capture.sessionRejected = true
+    })
+    if (!capture.payload.username) {
+      const key = `split-login:${sender.tab.id}:${sender.frameId || 0}`
+      capture.usernameReady = (async () => {
+        await capture.sessionReady
+        const split = (await chrome.storage.session.get?.(key))?.[key]
+        if (
+          split &&
+          split.origin === senderUrl.origin &&
+          split.revision === capture.payload.vault_revision &&
+          split.kind ===
+            (capture.payload.capture_kind === 'registration' ? 'registration' : 'login') &&
+          Date.now() - split.at < 120000
+        )
+          capture.payload.username = split.username
+        if (capture.payload.capture_kind === 'registration' && !capture.payload.username)
+          capture.sessionRejected = true
+        await chrome.storage.session.remove?.(key)
+      })()
+    }
     captureStatusOwners.set(sender.tab.id, capture.statusId)
     captureStatus(sender.tab.id, capture, 'submitted')
 
@@ -345,7 +676,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (!capture.documentId || (sender.documentId && sender.documentId !== capture.documentId)) &&
       sameOrigin(sender.url, capture.payload.page_url)
     ) {
-      if (message.hasLoginFields || message.hasLoginError) {
+      const registration = capture.payload.capture_kind === 'registration'
+      const passwordChange = capture.payload.capture_kind === 'password-change'
+      const registrationReturned =
+        registration &&
+        (message.registrationSucceeded ||
+          (message.hasRegistrationFields === false &&
+            !sameRequestUrl(sender.url, capture.payload.page_url)))
+      if (
+        message.hasLoginError ||
+        (registration ? !registrationReturned : passwordChange ? !message.passwordChangeSucceeded : message.hasLoginFields)
+      ) {
         captureStatus(sender.tab.id, capture, 'login-failed')
         capture.cancelled = true
         clearPendingCapture(sender.tab.id, capture)
@@ -426,7 +767,9 @@ chrome.webRequest.onCompleted.addListener(
     }
 
     capture.requestSeen = true
-    setTimeout(() => sendCapture(tabId, capture), CAPTURE_CONFIRM_DELAY_MS)
+    // A successful HTTP response can still contain a registration validation
+    // error. Require a success message or a completed page transition.
+    // HTTP 200 alone never proves that the supplied credentials were accepted.
   },
   { urls: ['<all_urls>'] }
 )

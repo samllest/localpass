@@ -94,6 +94,10 @@ if (!process.versions.electron) {
               qa.pageStates.push(message)
               return
             }
+            if (message.type === 'LP_SITE_VISITED') {
+              qa.siteVisits = (qa.siteVisits || []).concat(message.payload)
+              return
+            }
             qa.messages.push(message)
             if (callback) qa.callbacks.push(callback)
           }
@@ -122,6 +126,11 @@ if (!process.versions.electron) {
   }
   async function run() {
     server = http.createServer((_req, res) => {
+      if (_req.url === '/api/login' && _req.method === 'POST') {
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify({ success: false, message: 'wrong password' }))
+        return
+      }
       if (_req.url === '/j_spring_security_check' && _req.method === 'POST') {
         _req.resume()
         res.writeHead(302, { Location: '/native-home' })
@@ -201,6 +210,76 @@ if (!process.versions.electron) {
       })
       await pause(350)
       assert.equal(await evaluate(() => qa.messages.length), 0)
+      assert.equal(await evaluate(() => !!qa.picker()), false)
+    })
+    await test('a focused username recovers when a SPA inserts its password field later', async () => {
+      window.webContents.focus()
+      await evaluate(() => {
+        document.querySelector('#password').remove()
+        document.querySelector('#username').focus()
+      })
+      assert.equal(await evaluate(() => qa.callbacks.length), 0)
+      await evaluate(() => {
+        document
+          .querySelector('#username')
+          .insertAdjacentHTML(
+            'afterend',
+            '<input id="password" type="password" autocomplete="current-password">'
+          )
+      })
+      await pause(750)
+      assert.equal(await evaluate(() => qa.callbacks.length), 1)
+      await evaluate(() => qa.reply())
+      assert.equal(await evaluate(() => !!qa.picker()), true)
+    })
+    await test('a focused username recovers when its loading password field becomes editable', async () => {
+      window.webContents.focus()
+      await evaluate(() => {
+        document.querySelector('#password').disabled = true
+        document.querySelector('#username').focus()
+        document.querySelector('#password').disabled = false
+      })
+      await pause(750)
+      assert.equal(await evaluate(() => qa.callbacks.length), 1)
+      await evaluate(() => qa.reply())
+      assert.equal(await evaluate(() => !!qa.picker()), true)
+    })
+    await test('late SPA project metadata retries an empty lookup without refreshing', async () => {
+      window.webContents.focus()
+      await evaluate(() => {
+        document.querySelector('meta[property="og:site_name"]').content = 'Loading'
+        document.querySelector('#username').focus()
+        document.querySelector('meta[property="og:site_name"]').content = 'Agent Router'
+        qa.callbacks[0]({ ok: true, accounts: [] })
+      })
+      assert.equal(await evaluate(() => qa.callbacks.length), 2)
+      assert.equal(
+        await evaluate(() => qa.messages.filter((m) => m.type === 'LP_LOOKUP')[1].project_name),
+        'Agent Router'
+      )
+      await evaluate(() => qa.reply(1))
+      assert.equal(await evaluate(() => !!qa.picker()), true)
+    })
+    await test('an empty lookup stays idle until the focused form or project actually changes', async () => {
+      await evaluate(() => {
+        document.querySelector('#username').focus()
+        qa.callbacks[0]({ ok: true, accounts: [] })
+        document.querySelector('#dashboard').textContent = 'Unrelated SPA update'
+      })
+      await pause(750)
+      assert.equal(await evaluate(() => qa.callbacks.length), 1)
+    })
+    await test('Escape prevents late project metadata from reopening a dismissed picker', async () => {
+      await open()
+      await evaluate(() => {
+        document.activeElement.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+        )
+        document.title = 'New project title'
+        document.querySelector('meta[property="og:site_name"]').content = 'New project'
+      })
+      await pause(750)
+      assert.equal(await evaluate(() => qa.callbacks.length), 1)
       assert.equal(await evaluate(() => !!qa.picker()), false)
     })
     await test('hovering over a login field does not look up accounts or open a picker', async () => {
@@ -329,7 +408,7 @@ if (!process.versions.electron) {
       )
       assert.equal(await evaluate(() => !!qa.picker()), false)
     })
-    await test('usernames scope to their form; new-password fields never trigger', async () => {
+    await test('usernames scope to their form; new-password fields never trigger autofill', async () => {
       await evaluate(() => document.querySelector('#new-password').focus())
       assert.equal(await evaluate(() => qa.callbacks.length), 0)
       await evaluate(() => {
@@ -382,10 +461,10 @@ if (!process.versions.electron) {
         true
       )
     })
-    await test('ordinary text and revealed registration fields never capture as passwords', async () => {
+    await test('ordinary text fields never capture as passwords', async () => {
       await evaluate(() => {
         document.body.innerHTML =
-          '<form><input id="username" value="demo"><input id="password" type="text" autocomplete="new-password" value="synthetic-only"><button type="submit">Sign in</button></form>'
+          '<form><input id="username" value="demo"><input id="password" type="text" value="synthetic-only"><button type="submit">Sign in</button></form>'
         document.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
         qa.click(document.querySelector('button'))
         document.querySelector('#password').removeAttribute('autocomplete')
@@ -395,6 +474,232 @@ if (!process.versions.electron) {
         await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOGIN_SUBMITTED')),
         false
       )
+    })
+    await test('registration captures email and matching new passwords without offering saved accounts', async () => {
+      await evaluate(() => {
+        document.body.innerHTML =
+          '<form id="signup"><input name="full-name" value="Example Person"><input id="email" type="email" autocomplete="email" value="new@example.invalid"><input name="verification-code" value="123456"><input id="password" type="password" autocomplete="new-password" value="synthetic-new-secret"><input id="confirm" type="password" autocomplete="new-password" value="synthetic-new-secret"><button type="submit">Sign up</button></form><main></main>'
+        document.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
+        document.querySelector('#email').focus()
+        document.querySelector('#password').focus()
+        qa.click(document.querySelector('button'))
+      })
+      const result = await evaluate(() => ({
+        lookups: qa.callbacks.length,
+        captures: qa.messages.filter((m) => m.type === 'LP_LOGIN_SUBMITTED')
+      }))
+      assert.equal(result.lookups, 0)
+      assert.equal(result.captures.length, 1)
+      assert.equal(result.captures[0].payload.username, 'new@example.invalid')
+      assert.equal(result.captures[0].payload.password, 'synthetic-new-secret')
+      assert.equal(result.captures[0].payload.capture_kind, 'registration')
+      assert.equal(result.captures[0].payload.selection_token, undefined)
+      await evaluate(() => {
+        document.querySelector('main').innerHTML = '<p role="status">注册成功，请登录</p>'
+      })
+      await pause(1400)
+      assert.equal(
+        await evaluate(() => qa.messages.filter((m) => m.type === 'LP_LOGIN_SUCCEEDED').length),
+        1
+      )
+    })
+    await test('registration rejects empty or mismatched confirmation and invalid email fields', async () => {
+      await evaluate(() => {
+        document.body.innerHTML =
+          '<form id="signup"><input id="email" type="email" required value="new@example.invalid"><input id="password" type="password" autocomplete="new-password" value="synthetic-new-secret"><input id="confirm" type="password" autocomplete="new-password"><button type="submit">创建账号</button></form>'
+        document.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
+        qa.click(document.querySelector('button'))
+        document.querySelector('#confirm').value = 'different-secret'
+        qa.click(document.querySelector('button'))
+        document.querySelector('#confirm').value = 'synthetic-new-secret'
+        document.querySelector('#email').value = 'not-an-email'
+        qa.click(document.querySelector('button'))
+      })
+      assert.equal(
+        await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOGIN_SUBMITTED')),
+        false
+      )
+    })
+    await test('formless Chinese registration captures phone and confirms a return to the login page', async () => {
+      await evaluate(() => {
+        document.body.innerHTML =
+          '<input id="phone" type="tel" name="mobile" value="15500000000"><input id="password" type="password" value="synthetic-new-secret"><input id="confirm" type="password" value="synthetic-new-secret"><div role="button" tabindex="0"><span>注册</span></div>'
+        qa.click(document.querySelector('[role="button"] span'))
+        history.pushState({}, '', '/login?registered=1')
+        document.body.innerHTML =
+          '<form id="signin"><input name="username"><input type="password" autocomplete="current-password"><button>登录</button></form>'
+      })
+      await pause(1400)
+      const result = await evaluate(() => ({
+        capture: qa.messages.find((m) => m.type === 'LP_LOGIN_SUBMITTED'),
+        confirmed: qa.messages.filter((m) => m.type === 'LP_LOGIN_SUCCEEDED')
+      }))
+      assert.equal(result.capture.payload.username, '15500000000')
+      assert.equal(result.capture.payload.capture_kind, 'registration')
+      assert.equal(result.confirmed.length, 1)
+      assert.equal(result.confirmed[0].attemptId, result.capture.attemptId)
+    })
+    await test('registration accepts Enter in a revealed confirmation field and native form submit', async () => {
+      await evaluate(() => {
+        document.body.innerHTML =
+          '<form id="signup"><input name="username" autocomplete="username" value="new-user"><input type="text" autocomplete="new-password" value="synthetic-new-secret"><input id="confirm" name="confirm-password" type="text" autocomplete="new-password" value="synthetic-new-secret"><button type="submit">Register</button></form>'
+        document.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
+        document
+          .querySelector('#confirm')
+          .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+        document.querySelector('form').requestSubmit()
+      })
+      const captures = await evaluate(() =>
+        qa.messages.filter((m) => m.type === 'LP_LOGIN_SUBMITTED')
+      )
+      assert.equal(captures.length, 1)
+      assert.equal(captures[0].payload.password, 'synthetic-new-secret')
+      assert.equal(captures[0].payload.username, 'new-user')
+    })
+    await test('registration success is not inferred from a disabled form, an old success notice or route change alone', async () => {
+      await evaluate(() => {
+        document.body.innerHTML =
+          '<form id="signup"><input name="username" value="new-user"><input type="password" autocomplete="new-password" value="synthetic-new-secret"><button type="submit">Register</button></form><p role="status">Account created successfully</p>'
+        document.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
+        qa.click(document.querySelector('button'))
+        history.pushState({}, '', '/register?pending=1')
+        document.querySelectorAll('input').forEach((input) => (input.disabled = true))
+      })
+      await pause(1400)
+      assert.equal(
+        await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOGIN_SUCCEEDED')),
+        false
+      )
+    })
+    await test('registration failure cancels even after a success candidate appears', async () => {
+      await evaluate(() => {
+        document.body.innerHTML =
+          '<form id="signup"><input name="username" value="new-user"><input type="password" autocomplete="new-password" value="synthetic-new-secret"><button type="submit">Register</button></form><main></main>'
+        document.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
+        qa.click(document.querySelector('button'))
+        document.querySelector('main').innerHTML = '<p role="status">注册成功</p>'
+      })
+      await pause(100)
+      await evaluate(
+        () => (document.querySelector('main').innerHTML = '<p role="alert">该账号已被注册</p>')
+      )
+      await pause(750)
+      assert.equal(
+        await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOGIN_FAILED')),
+        true
+      )
+      assert.equal(
+        await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOGIN_SUCCEEDED')),
+        false
+      )
+    })
+    await test('password reset and password change forms use a dedicated capture kind', async () => {
+      for (const html of [
+        '<form><input name="username" value="existing-user"><input type="password" autocomplete="new-password" value="synthetic-new-secret"><button type="submit">Reset password</button></form>',
+        '<form><input name="username" value="existing-user"><input name="old-password" type="password" autocomplete="current-password" value="synthetic-old-secret"><input type="password" autocomplete="new-password" value="synthetic-new-secret"><button type="submit">修改密码</button></form>'
+      ]) {
+        await evaluate((html) => {
+          document.body.innerHTML = html
+          document
+            .querySelector('form')
+            .addEventListener('submit', (event) => event.preventDefault())
+          qa.click(document.querySelector('button'))
+        }, html)
+        const submitted = await evaluate(() =>
+          qa.messages.filter((m) => m.type === 'LP_LOGIN_SUBMITTED').at(-1)
+        )
+        assert.equal(submitted.payload.capture_kind, 'password-change')
+        assert.equal(submitted.payload.password, 'synthetic-new-secret')
+      }
+    })
+    await test('two-step login keeps only the username and password submission is captured separately', async () => {
+      await evaluate(() => {
+        document.body.innerHTML =
+          '<form><input name="username" autocomplete="username" value="split-user"><button type="submit">下一步</button></form>'
+        document.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
+        document.querySelector('button').click()
+      })
+      assert.equal(
+        await evaluate(() => qa.messages.find((m) => m.type === 'LP_SPLIT_USERNAME')?.username),
+        'split-user'
+      )
+      assert.equal(
+        await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOGIN_SUBMITTED')),
+        false
+      )
+      await evaluate(() => {
+        document.body.innerHTML =
+          '<form><input type="password" value="split-secret"><button type="submit">登录</button></form>'
+        document.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
+        document.querySelector('button').click()
+      })
+      assert.equal(
+        await evaluate(
+          () => qa.messages.find((m) => m.type === 'LP_LOGIN_SUBMITTED')?.payload.password
+        ),
+        'split-secret'
+      )
+    })
+    await test('password changes wait for success and reject inconsistent new passwords', async () => {
+      await evaluate(() => {
+        document.body.innerHTML =
+          '<form><input name="old-password" type="password" autocomplete="current-password" value="old-secret"><input type="password" autocomplete="new-password" value="new-secret"><input name="confirm" type="password" value="mismatch"><button type="submit">修改密码</button></form><div role="status" id="result"></div>'
+        document.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
+        document.querySelector('button').click()
+      })
+      assert.equal(
+        await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOGIN_SUBMITTED')),
+        false
+      )
+      await pause(850)
+      await evaluate(() => {
+        document.querySelector('[name="confirm"]').value = 'new-secret'
+        document.querySelector('button').click()
+      })
+      const submitted = await evaluate(() =>
+        qa.messages.find((m) => m.type === 'LP_LOGIN_SUBMITTED')
+      )
+      assert.equal(submitted.payload.previous_password, 'old-secret')
+      assert.equal(
+        await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOGIN_SUCCEEDED')),
+        false
+      )
+      await evaluate(() => {
+        document.querySelector('#result').textContent = '密码修改成功'
+      })
+      await pause(750)
+      assert.equal(
+        await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOGIN_SUCCEEDED')),
+        true
+      )
+    })
+    await test('open Shadow DOM login fields capture the correct account and hidden hosts are excluded', async () => {
+      await evaluate(() => {
+        document.body.innerHTML = '<div id="shadow-host"></div>'
+        const root = document.querySelector('#shadow-host').attachShadow({ mode: 'open' })
+        root.innerHTML = '<form><input name="username" value="shadow-user"><input type="password" value="shadow-secret"><button type="submit">登录</button></form>'
+        root.querySelector('form').addEventListener('submit', event => event.preventDefault())
+        root.querySelector('button').click()
+      })
+      const submitted = await evaluate(() => qa.messages.find(m => m.type === 'LP_LOGIN_SUBMITTED'))
+      assert.equal(submitted.payload.username, 'shadow-user')
+      assert.equal(submitted.payload.password, 'shadow-secret')
+      await pause(850)
+      await evaluate(() => { document.querySelector('#shadow-host').hidden = true; document.querySelector('#shadow-host').shadowRoot.querySelector('button').click() })
+      assert.equal(await evaluate(() => qa.messages.filter(m => m.type === 'LP_LOGIN_SUBMITTED').length), 1)
+    })
+    await test('HTTP 200 with JSON authentication failure cancels the current attempt', async () => {
+      const observer = fs.readFileSync(path.join(__dirname, '../chrome-extension/network-observer.js'), 'utf8')
+      await window.webContents.executeJavaScript(observer)
+      await evaluate(() => {
+        document.querySelector('#username').value = 'user'
+        document.querySelector('#password').value = 'bad-password'
+        document.querySelector('#submit').click()
+        void fetch('/api/login', { method: 'POST' })
+      })
+      await pause(300)
+      assert.equal(await evaluate(() => qa.messages.some(m => m.type === 'LP_LOGIN_FAILED')), true)
+      assert.equal(await evaluate(() => qa.messages.some(m => m.type === 'LP_LOGIN_SUCCEEDED')), false)
     })
     await test('SPA login controls without a form still fill and capture on login', async () => {
       await evaluate(() => {
@@ -579,6 +884,94 @@ if (!process.versions.electron) {
       const screenshotPath = path.join(profile, 'picker-above-input.png')
       fs.writeFileSync(screenshotPath, (await window.webContents.capturePage()).toPNG())
       console.log(`Picker screenshot: ${screenshotPath}`)
+    })
+    await test('picker separates usernames and long site names, resists website CSS and supports both themes', async () => {
+      const { nativeTheme } = require('electron')
+      const previousTheme = nativeTheme.themeSource
+      try {
+        for (const theme of ['light', 'dark']) {
+          nativeTheme.themeSource = theme
+          await evaluate(() => {
+            if (!document.querySelector('#picker-page-style')) {
+              const style = document.createElement('style')
+              style.id = 'picker-page-style'
+              style.textContent = `
+                body { margin:0; font-family: sans-serif; background:#f4f6fa; }
+                #login { position:fixed; left:340px; top:240px; width:360px; padding:28px; border-radius:16px; background:white; }
+                #login::before { content:'众想社区'; display:block; color:#1b2433; font-size:24px; font-weight:600; margin-bottom:20px; }
+                #login input { display:block; width:100%; height:40px; margin:12px 0; box-sizing:border-box; border:1px solid #d8dee9; border-radius:8px; }
+                #other, #register, #search, #outside { display:none; }
+                button { font-size:28px !important; font-family:serif !important; background:red !important; border:4px solid red !important; padding:30px !important; }
+                span { color:red !important; }
+                button::before { content:'unwanted website decoration' !important; }
+              `
+              document.head.appendChild(style)
+            }
+            qa.click(document.querySelector('#password'))
+            qa.callbacks[qa.callbacks.length - 1]({
+              ok: true,
+              accounts: [
+                { username:'yjg', displayName:'众想社区 - 企业论坛知识社区', password:'synthetic-hidden-password' },
+                { username:'<img src=x onerror=alert(1)>', displayName:'众想社区 - 企业论坛知识社区 - 一个非常长的网站名称', password:'synthetic-hidden-password' }
+              ]
+            })
+          })
+          await pause()
+          const view = await evaluate(() => {
+            const picker = qa.picker()
+            const button = picker.querySelector('button')
+            const username = picker.querySelector('.lp-username')
+            const site = picker.querySelector('.lp-site')
+            return {
+              background: getComputedStyle(picker).backgroundColor,
+              font: getComputedStyle(username).fontSize,
+              siteColor: getComputedStyle(site).color,
+              buttonPadding: getComputedStyle(button).padding,
+              pseudo: getComputedStyle(button, '::before').content,
+              username: username.textContent,
+              site: site.textContent,
+              siteEllipsis: getComputedStyle(site).textOverflow,
+              text: picker.innerText,
+              images: picker.querySelectorAll('img').length,
+              overflow: picker.scrollWidth > picker.clientWidth
+            }
+          })
+          assert.equal(view.background, theme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(30, 34, 48)')
+          assert.equal(view.font, '14px')
+          assert.notEqual(view.siteColor, 'rgb(255, 0, 0)')
+          assert.equal(view.buttonPadding, '12px')
+          assert.equal(view.pseudo, 'none')
+          assert.equal(view.username, 'yjg')
+          assert.equal(view.site, '众想社区 - 企业论坛知识社区')
+          assert.equal(view.siteEllipsis, 'ellipsis')
+          assert.equal(view.text.includes('synthetic-hidden-password'), false)
+          assert.equal(view.images, 0)
+          assert.equal(view.overflow, false)
+          // Keep the visual sample readable after asserting hostile account text is inert.
+          await evaluate(() => {
+            const second = qa.picker().querySelectorAll('button')[1]
+            second.querySelector('.lp-username').textContent = 'zhangsan@company.com'
+            second.querySelector('.lp-avatar').textContent = 'Z'
+          })
+          const output = path.join(__dirname, `../out/picker-${theme}.png`)
+          fs.mkdirSync(path.dirname(output), { recursive:true })
+          const bounds = await evaluate(() => {
+            const rect = qa.picker().getBoundingClientRect()
+            return { x: Math.floor(rect.left - 20), y: Math.floor(rect.top - 20), width: Math.ceil(rect.width + 40), height: Math.ceil(rect.height + 40) }
+          })
+          fs.writeFileSync(output, (await window.webContents.capturePage(bounds)).toPNG())
+          console.log(`Picker preview: ${output}`)
+          await evaluate(() => {
+            const button = qa.picker().querySelector('button')
+            button.focus()
+            qa.click(button.querySelector('.lp-username'))
+          })
+          assert.equal(await evaluate(() => document.querySelector('#username').value), 'yjg')
+          assert.equal(await evaluate(() => !!qa.picker()), false)
+        }
+      } finally {
+        nativeTheme.themeSource = previousTheme
+      }
     })
     await test('a field near the top places the picker to the right or left when space permits', async () => {
       for (const left of [40, 800]) {
@@ -829,7 +1222,9 @@ if (!process.versions.electron) {
           '<form><input type="password"></form><div class="error">Invalid username or password</div>'
       })
       await pause(750)
-      const failed = await evaluate(() => qa.pageStates.at(-1))
+      const failed = await evaluate(() =>
+        qa.pageStates.filter((m) => m.type === 'LP_PAGE_STATE').at(-1)
+      )
       assert.equal(failed.hasLoginFields, true)
       assert.equal(failed.hasLoginError, true)
     })
@@ -891,6 +1286,56 @@ if (!process.versions.electron) {
       }, metadata.icon_data)
       assert.deepEqual(dimensions, [32, 32])
     })
+    await test('normal page visits publish icon metadata without reading or submitting credentials', async () => {
+      await evaluate(() => {
+        document.querySelector('#username').value = 'do-not-send-user'
+        document.querySelector('#password').value = 'do-not-send-secret'
+      })
+      await pause(1650)
+      const visited = await evaluate(() => qa.siteVisits)
+      assert.equal(visited.length, 1)
+      assert.ok(visited[0].icon_urls.some((url) => url.endsWith('/brand.png')))
+      assert.equal(JSON.stringify(visited).includes('do-not-send-'), false)
+      assert.equal(
+        await evaluate(() => qa.messages.some((m) => m.type === 'LP_LOGIN_SUBMITTED')),
+        false
+      )
+      await evaluate(() => {
+        document.querySelector('link[rel="icon"]').href = '/updated-brand.png'
+      })
+      await pause(1650)
+      assert.equal(await evaluate(() => qa.siteVisits.length), 2)
+    })
+    await test('the offscreen decoder converts SVG into a bounded PNG and ignores non-image messages', async () => {
+      const decoder = fs.readFileSync(
+        path.join(__dirname, '../chrome-extension/icon-offscreen.js'),
+        'utf8'
+      )
+      await window.webContents.executeJavaScript(decoder)
+      const result = await evaluate(async () => {
+        const listener = qa.listeners.at(-1)
+        const data =
+          'data:image/svg+xml;base64,' +
+          btoa(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#6b4ee6"/></svg>'
+          )
+        const result = await new Promise((resolve) =>
+          listener({ type: 'LP_RASTERIZE_ICON', data }, {}, resolve)
+        )
+        const image = new Image()
+        image.src = result.icon
+        await image.decode()
+        return {
+          icon: result.icon,
+          dimensions: [image.naturalWidth, image.naturalHeight],
+          unrelated: listener({ type: 'LP_LOOKUP' }, {}, () => {})
+        }
+      })
+      assert.match(result.icon, /^data:image\/png;base64,iVBORw0KGgo/)
+      assert.ok(result.icon.length <= 24576)
+      assert.deepEqual(result.dimensions, [32, 32])
+      assert.equal(result.unrelated, false)
+    })
     await test('site icon downloads rasterize into a bounded local PNG', async () => {
       fixturePng = Buffer.from(
         await evaluate(() => {
@@ -927,7 +1372,7 @@ if (!process.versions.electron) {
       }, result)
       assert.deepEqual(rendered, [32, 32])
     })
-    await test('status popup checks connectivity without requesting credentials and explains silent save failures', async () => {
+    await test('popup lists current-site accounts and explains save failures with diagnostics collapsed', async () => {
       const popupHtml = fs.readFileSync(
         path.join(__dirname, '../chrome-extension/popup.html'),
         'utf8'
@@ -954,6 +1399,8 @@ if (!process.versions.electron) {
           window.qaPopup.requests.push(String(url))
           if (String(url).includes('/extension-status'))
             return new Response(JSON.stringify({ ok: true, version: '1.3.7' }))
+          if (String(url).includes('identity=') && window.qaPopup.connected)
+            return new Response(JSON.stringify({ ok: true, accounts: [{ username: '<img src=x onerror=alert(1)>', password: 'synthetic-only' }] }))
           return new Response(
             JSON.stringify({
               error: window.qaPopup.connected ? 'Identity is required' : 'Vault locked'
@@ -998,8 +1445,12 @@ if (!process.versions.electron) {
       assert.match(text.extension, /当前 1.3.7，已与桌面端同步/)
       assert.deepEqual(text.requests, [
         'http://127.0.0.1:35320/lookup',
-        'http://127.0.0.1:35320/extension-status?version=1.3.7'
+        'http://127.0.0.1:35320/extension-status?version=1.3.7',
+        'http://127.0.0.1:35320/lookup?identity=example.invalid'
       ])
+      assert.equal(await evaluate(() => document.querySelector('#accounts strong').textContent), '<img src=x onerror=alert(1)>')
+      assert.equal(await evaluate(() => !!document.querySelector('#accounts img')), false)
+      assert.equal(await evaluate(() => document.querySelector('details').open), false)
       await evaluate(() => {
         window.qaPopup.connected = false
         window.qaPopup.injected = false

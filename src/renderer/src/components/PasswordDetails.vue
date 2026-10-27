@@ -45,6 +45,7 @@
         v-for="(account, index) in group.accounts"
         :key="recordId(account)"
         class="account-section"
+        @contextmenu.prevent="accountMenu(account)"
       >
         <header class="multi-account-heading">
           <h3 v-if="group.accounts.length > 1">账号 {{ index + 1 }}</h3>
@@ -60,6 +61,7 @@
           </div>
         </header>
         <div class="credential-card">
+          <TotpCode v-if="account.has_totp" :id="recordId(account)" @copy="$emit('copy', $event)" />
           <div class="credential-field">
             <div>
               <label>用户名</label>
@@ -97,6 +99,10 @@
             </button>
           </div>
         </div>
+        <p v-if="account.notes || account.tags || account.favorite" class="field-hint">
+          {{ account.favorite ? '★ 收藏 · ' : '' }}{{ account.tags
+          }}{{ account.notes ? ` · ${account.notes}` : '' }}
+        </p>
         <footer v-if="group.accounts.length > 1" class="credential-actions">
           <span>更新于 {{ formatDate(account.captured_at) }}</span
           ><button
@@ -172,16 +178,29 @@ import UiIcon from './UiIcon.vue'
 import SiteAvatar from './SiteAvatar.vue'
 import SiteAddress from './SiteAddress.vue'
 import PasswordHistory from './PasswordHistory.vue'
+import TotpCode from './TotpCode.vue'
 import { formatDate, recordId, recordWebsiteUrl } from '../utils/vault'
 
 const props = defineProps({ group: { type: Object, required: true } })
-const emit = defineEmits(['back', 'copy', 'edit', 'delete', 'add'])
+const emit = defineEmits(['back', 'copy', 'edit', 'delete', 'add', 'changed'])
 const actionsMenu = ref(null)
 const visible = ref(new Set())
 const historyOpen = ref(null)
 const history = ref([])
 const historyLoading = ref(false)
 const historyError = ref('')
+async function accountMenu(account) {
+  const action = await window.localpass.contextMenu({ group: false })
+  if (action === 'username') emit('copy', account.username)
+  if (action === 'password') emit('copy', account.password)
+  if (action === 'edit') emit('edit', account)
+  if (action === 'delete') emit('delete', account)
+  if (action === 'history') toggleHistory(account)
+  if (action === 'favorite') {
+    await window.localpass.updateApp({ app_id: recordId(account), favorite: !account.favorite })
+    emit('changed')
+  }
+}
 const url = computed(() => (props.group.category === 'web' ? recordWebsiteUrl(props.group) : null))
 const protocol = computed(() => (url.value ? new URL(url.value).protocol + '//' : ''))
 const localAddress = computed(() => {

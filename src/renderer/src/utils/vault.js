@@ -1,4 +1,8 @@
-import { websiteAddress, normalizeSiteMetadata } from '../../../shared/site-metadata.js'
+import {
+  websiteAddress,
+  normalizeSiteMetadata,
+  safeIconData
+} from '../../../shared/site-metadata.js'
 import { isDevelopmentSite, projectKey } from '../../../shared/project-matching.js'
 
 const collator = new Intl.Collator('zh-CN', { sensitivity: 'base', numeric: true })
@@ -24,7 +28,8 @@ export function groupAccounts(records) {
   return [...groups.values()]
     .map((group) => ({
       ...group,
-      icon_data: group.accounts.find((account) => account.icon_data)?.icon_data || '',
+      icon_data:
+        group.accounts.map((account) => safeIconData(account.icon_data)).find(Boolean) || '',
       site_name: group.accounts.find((account) => account.site_name)?.site_name || '',
       page_title: group.accounts.find((account) => account.page_title)?.page_title || '',
       site_url: group.accounts.find((account) => account.site_url)?.site_url || '',
@@ -37,7 +42,10 @@ export function filterGroups(groups, query, category = 'all', sort = 'name') {
   const text = query.trim().toLocaleLowerCase()
   const filtered = groups.filter(
     (group) =>
-      (category === 'all' || group.category === category) &&
+      (category === 'all' ||
+        (category === 'favorite'
+          ? group.accounts.some((account) => account.favorite)
+          : group.category === category)) &&
       (!text ||
         [
           group.display_name,
@@ -45,7 +53,8 @@ export function filterGroups(groups, query, category = 'all', sort = 'name') {
           group.page_title,
           group.project_name,
           group.identity,
-          ...group.accounts.map((account) => account.username)
+          ...group.accounts.map((account) => account.username),
+          ...group.accounts.flatMap((account) => [account.notes, account.tags])
         ].some((value) =>
           String(value || '')
             .toLocaleLowerCase()

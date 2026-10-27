@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import vm from 'node:vm'
 import { readFileSync } from 'node:fs'
+import { DEFAULT_BROWSER_ICON } from '../src/shared/site-metadata.js'
 
 const source = readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8')
 const png = Buffer.from(
@@ -24,12 +25,12 @@ test('worker recovery reattaches every open web tab and tolerates restricted fra
   }
   await vm.runInContext('repairOpenPages()', context)
   assert.deepEqual(
-    injected.map((entry) => entry.target.tabId),
+    injected.filter((entry) => !entry.world).map((entry) => entry.target.tabId),
     [11, 12]
   )
   for (const entry of injected) {
     assert.equal(entry.target.allFrames, true)
-    assert.deepEqual(Array.from(entry.files), ['content.js'])
+    assert.deepEqual(Array.from(entry.files), [entry.world ? 'network-observer.js' : 'content.js'])
   }
 })
 
@@ -113,6 +114,7 @@ function background(options = {}) {
     URL,
     Blob,
     Uint8Array,
+    TextDecoder,
     AbortSignal,
     AbortController,
     btoa,
@@ -161,7 +163,7 @@ function background(options = {}) {
         return { drawImage() {} }
       }
       async convertToBlob() {
-        return new Blob([png], { type: 'image/png' })
+        return new Blob([options.rasterizedPng || png], { type: 'image/png' })
       }
     },
     fetch: async (url, config) => {
@@ -169,6 +171,8 @@ function background(options = {}) {
       messages.push({ url: address, config })
       if (address.includes('127.0.0.1:35320') && options.lookupFetch && address.includes('/lookup'))
         return options.lookupFetch(address, config)
+      if (address.includes('127.0.0.1:35320/site-icons') && options.siteIconsFetch)
+        return options.siteIconsFetch(address, config)
       if (address.endsWith('/capture') && options.captureFetch)
         return options.captureFetch(address, config)
       if (address.includes('127.0.0.1:35320'))
@@ -192,10 +196,11 @@ function background(options = {}) {
     messages,
     timers,
     status: () => statuses['capture-status:7'],
-    submit: (attemptId) =>
+    message: (message, sender = {}) => onMessage(message, { tab: { id: 7 }, frameId: 0, url: payload.page_url, ...sender }, () => {}),
+    submit: (attemptId, overrides = {}) =>
       onMessage(
-        { type: 'LP_LOGIN_SUBMITTED', payload, attemptId },
-        { tab: { id: 7 }, frameId: 0, documentId: 'login-page' },
+        { type: 'LP_LOGIN_SUBMITTED', payload: { ...payload, ...overrides }, attemptId },
+        { tab: { id: 7 }, frameId: 0, documentId: 'login-page', url: payload.page_url },
         () => {}
       ),
     confirm: (attemptId, overrides = {}) =>
@@ -287,6 +292,33 @@ test('background uses the sender URL port even with an old content script', asyn
   assert.equal(new URL(fixture.messages[0].url).searchParams.get('project_name'), 'Agent Router')
 })
 
+test('split login only combines a username in the same origin, frame and unlocked vault revision', async () => {
+  for (const mismatch of ['none', 'revision', 'origin', 'kind', 'expired']) {
+    const fixture = background()
+    const stored = {}
+    fixture.context.chrome.storage.session = { set: async values => Object.assign(stored, values), get: async key => ({ [key]: stored[key] }), remove: async key => delete stored[key] }
+    let revision = 'desktop:1'
+    fixture.context.fetch = async (url, config) => {
+      fixture.messages.push({ url: String(url), config })
+      if (String(url).includes('/extension-status')) return new Response(JSON.stringify({ ok: true, unlocked: true, revision }))
+      if (String(url).endsWith('/capture')) return new Response(JSON.stringify({ ok: true, changed: true }))
+      return new Response(png, { headers: { 'content-type': 'image/png' } })
+    }
+    fixture.message({ type: 'LP_SPLIT_USERNAME', username: 'split-user', kind: 'login' })
+    await new Promise(resolve => setImmediate(resolve))
+    const split = stored['split-login:7:0']
+    if (mismatch === 'revision') revision = 'desktop:2'
+    if (mismatch === 'origin') split.origin = 'https://other.example'
+    if (mismatch === 'kind') split.kind = 'registration'
+    if (mismatch === 'expired') split.at = Date.now() - 120001
+    fixture.submit('split', { username: '' })
+    await fixture.send()
+    const capture = fixture.messages.find(entry => entry.url.endsWith('/capture'))
+    assert.equal(JSON.parse(capture.config.body).username, mismatch === 'none' ? 'split-user' : '')
+    assert.equal(stored['split-login:7:0'], undefined)
+  }
+})
+
 test('cancelling a document lookup aborts its HTTP request without affecting another document', async () => {
   const fixture = background({
     lookupFetch: (_url, { signal }) =>
@@ -325,6 +357,71 @@ test('a native login returning HTTP 200 also waits for the destination login sta
   assert.equal(fixture.timers.filter((t) => t.delay === 1800).length, 0)
   fixture.pageState({ hasLoginFields: true })
   assert.equal(fixture.timers.filter((t) => t.delay === 1800).length, 0)
+})
+
+test('registration POST success waits for explicit page confirmation before persistence', async () => {
+  const fixture = background()
+  fixture.submit('registration', { capture_kind: 'registration' })
+  fixture.completed(3000)
+  assert.equal(fixture.timers.filter((t) => t.delay === 1800).length, 0)
+  fixture.confirm('registration')
+  await fixture.timers.find((t) => t.delay === 1800).callback()
+  const saved = JSON.parse(fixture.messages.find((m) => m.url.endsWith('/capture')).config.body)
+  assert.equal(saved.capture_kind, 'registration')
+  assert.equal(saved.username, 'demo')
+})
+
+test('registration redirected to a login page saves instead of treating login fields as failure', async () => {
+  const fixture = background()
+  fixture.submit('registration', { capture_kind: 'registration' })
+  fixture.redirect()
+  fixture.pageState(
+    { hasLoginFields: true, hasRegistrationFields: false },
+    {
+      url: 'http://10.0.15.33:3000/signin'
+    }
+  )
+  await fixture.timers.find((t) => t.delay === 1800).callback()
+  assert.equal(fixture.status().state, 'saved')
+})
+
+test('registration returning to the same page only saves with an explicit success notice', async () => {
+  const fixture = background()
+  fixture.submit('registration', { capture_kind: 'registration' })
+  fixture.nativeCompleted()
+  fixture.pageState(
+    { hasRegistrationFields: true, registrationSucceeded: true },
+    {
+      url: 'http://10.0.15.33:3000/login'
+    }
+  )
+  await fixture.timers.find((t) => t.delay === 1800).callback()
+  assert.equal(fixture.status().state, 'saved')
+})
+
+test('failed registration responses, unchanged pages and old page scripts never persist', async () => {
+  for (const [state, url] of [
+    [{ hasRegistrationFields: true }, 'http://10.0.15.33:3000/signup'],
+    [
+      { hasRegistrationFields: false, hasLoginError: true, registrationSucceeded: true },
+      'http://10.0.15.33:3000/signin'
+    ],
+    [{ hasRegistrationFields: false }, 'http://10.0.15.33:3000/login'],
+    [{ hasLoginFields: true }, 'http://10.0.15.33:3000/signin']
+  ]) {
+    const fixture = background()
+    fixture.submit('registration', { capture_kind: 'registration' })
+    fixture.nativeCompleted()
+    fixture.pageState(state, { url })
+    assert.equal(fixture.timers.filter((t) => t.delay === 1800).length, 0)
+    assert.equal(fixture.status().state, 'login-failed')
+  }
+  const fixture = background()
+  fixture.submit('registration', { capture_kind: 'registration' })
+  fixture.completed(3000, 400)
+  fixture.confirm('registration')
+  assert.equal(fixture.timers.filter((t) => t.delay === 1800).length, 0)
+  assert.equal(fixture.status().state, 'request-failed')
 })
 
 test('failed redirect destinations cancel saving, including errors appearing after a success candidate', async () => {
@@ -384,12 +481,14 @@ test('stale, cross-origin, other-frame and other-document confirmations cannot s
   assert.equal(fixture.timers.filter((timer) => timer.delay === 1800).length, 0)
 })
 
-test('a login request on a different port neither saves nor cancels this login', async () => {
+test('HTTP success alone never saves; an explicit page confirmation preserves the website port', async () => {
   const fixture = background()
-  fixture.submit()
+  fixture.submit('http-result')
   fixture.completed(8080, 500)
   assert.equal(fixture.timers.filter((timer) => timer.delay === 1800).length, 0)
   fixture.completed(3000)
+  assert.equal(fixture.timers.filter((timer) => timer.delay === 1800).length, 0)
+  fixture.confirm('http-result')
   assert.equal(fixture.timers.filter((timer) => timer.delay === 1800).length, 1)
   await fixture.timers.find((timer) => timer.delay === 1800).callback()
   const saved = JSON.parse(
@@ -414,6 +513,165 @@ test('an unavailable favicon does not prevent saving the password and name', asy
   assert.equal(saved.site_name, 'Agent Router')
 })
 
+test('icons served with a generic MIME type are decoded; HTML favicon fallbacks are rejected', async () => {
+  const fixture = background({
+    iconFetch: async () =>
+      new Response(png, { headers: { 'content-type': 'application/octet-stream' } })
+  })
+  assert.match(
+    await fixture.context.loadSiteIcon('https://example.com/favicon.png'),
+    /^data:image\/png;base64,/
+  )
+  fixture.context.fetch = async () =>
+    new Response('<!DOCTYPE html><html>SPA shell</html>', {
+      headers: { 'content-type': 'image/png' }
+    })
+  assert.equal(await fixture.context.loadSiteIcon('https://example.com/favicon.ico'), '')
+})
+
+test('icon fetch accepts redirects and uses credentials only for the current website origin', async () => {
+  const fixture = background()
+  await fixture.context.loadSiteIcon('https://example.com/icon.png', 'https://example.com/login')
+  await fixture.context.loadSiteIcon(
+    'https://cdn.example.com/icon.png',
+    'https://example.com/login'
+  )
+  assert.equal(fixture.messages[0].config.redirect, 'follow')
+  assert.equal(fixture.messages[0].config.credentials, 'include')
+  assert.equal(fixture.messages[1].config.credentials, 'omit')
+})
+
+test('background discovers actual favicon links when favicon.ico returns a page and browser cache is empty', async () => {
+  const fixture = background({
+    iconFetch: async (url) => {
+      if (url === 'http://10.0.15.33:3000')
+        return new Response(
+          '<html><head><link href="/assets/favicon.png" rel="shortcut icon"></head></html>',
+          { headers: { 'content-type': 'text/html' } }
+        )
+      if (url.endsWith('/assets/favicon.png'))
+        return new Response(png, { headers: { 'content-type': 'image/png' } })
+      return new Response('<!DOCTYPE html><html>SPA fallback</html>', {
+        headers: { 'content-type': 'text/html' }
+      })
+    }
+  })
+  const result = await fixture.context.enrichSite(undefined, {
+    page_url: 'http://10.0.15.33:3000/login'
+  })
+  assert.match(result.icon_data, /^data:image\/png;base64,/)
+  assert.ok(fixture.messages.some((message) => message.url.endsWith('/assets/favicon.png')))
+})
+
+test('live page rasterization supplies icons when direct requests are blocked', async () => {
+  const fixture = background({ iconFetch: async () => new Response('', { status: 403 }) })
+  fixture.context.chrome.tabs.sendMessage = async (_id, message) => {
+    assert.equal(message.type, 'LP_COLLECT_SITE_ICON')
+    return { icon: `data:image/png;base64,${png.toString('base64')}` }
+  }
+  const result = await fixture.context.enrichSite(7, { page_url: 'http://10.0.15.33:3000/login' })
+  assert.match(result.icon_data, /^data:image\/png;base64,/)
+})
+
+test('browser placeholder responses fall through to actual site links', async () => {
+  const placeholder = Buffer.from(DEFAULT_BROWSER_ICON.split(',')[1], 'base64')
+  const fixture = background({
+    iconFetch: async (url) => {
+      if (url.startsWith('chrome-extension:'))
+        return new Response(placeholder, { headers: { 'content-type': 'image/png' } })
+      if (url === 'https://example.com') return new Response('<link rel="icon" href="/real.png">')
+      if (url.endsWith('/real.png'))
+        return new Response(png, { headers: { 'content-type': 'image/png' } })
+      return new Response('', { status: 404 })
+    }
+  })
+  assert.equal(vm.runInContext('DEFAULT_BROWSER_ICON', fixture.context), DEFAULT_BROWSER_ICON)
+  const result = await fixture.context.enrichSite(undefined, {
+    page_url: 'https://example.com/login'
+  })
+  assert.match(result.icon_data, /^data:image\/png;base64,/)
+  assert.ok(fixture.messages.some(({ url }) => url.endsWith('/real.png')))
+})
+
+test('filling reports activity using the sender site without sending credentials', async () => {
+  const fixture = background()
+  fixture.message({
+    type: 'LP_ACCOUNT_USED',
+    selectionToken: 'selected',
+    identity: 'wrong.example'
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+  const request = fixture.messages.find(({ url }) => url.endsWith('/activity'))
+  assert.deepEqual(JSON.parse(request.config.body), {
+    identity: '10.0.15.33:3000',
+    selection_token: 'selected'
+  })
+  fixture.message(
+    { type: 'LP_ACCOUNT_USED', selectionToken: 'selected' },
+    { url: 'file:///private' }
+  )
+  assert.equal(fixture.messages.filter(({ url }) => url.endsWith('/activity')).length, 1)
+})
+
+test('normalized and live-page placeholders never count as successful icons', async () => {
+  const fixture = background({
+    rasterizedPng: Buffer.from(DEFAULT_BROWSER_ICON.split(',')[1], 'base64')
+  })
+  assert.equal(await fixture.context.loadSiteIcon('https://example.com/icon.png'), '')
+  fixture.context.chrome.tabs.sendMessage = async () => ({ icon: DEFAULT_BROWSER_ICON })
+  const result = await fixture.context.enrichSite(7, { page_url: 'http://10.0.15.33:3000/login' })
+  assert.equal(result.icon_data, '')
+})
+
+test('automatic icon scan writes metadata only, retries failures with backoff and retries after a vault session changes', async () => {
+  let revision = 'session-a',
+    unavailable = false
+  const fixture = background({
+    siteIconsFetch: async (_url, config) =>
+      config.method === 'POST'
+        ? new Response(JSON.stringify({ ok: true }))
+        : new Response(
+            JSON.stringify({
+              ok: true,
+              revision,
+              sites: [
+                {
+                  id: 42,
+                  identity: '10.0.15.33:3000',
+                  site_url: 'http://10.0.15.33:3000',
+                  project_name: 'Agent Router'
+                }
+              ]
+            })
+          ),
+    iconFetch: async () =>
+      unavailable
+        ? new Response('', { status: 404 })
+        : new Response(png, { headers: { 'content-type': 'image/png' } })
+  })
+  await fixture.context.refreshMissingIcons()
+  const writes = () =>
+    fixture.messages.filter(
+      (message) => message.url.endsWith('/site-icons') && message.config.method === 'POST'
+    )
+  assert.equal(writes().length, 1)
+  const saved = JSON.parse(writes()[0].config.body)
+  assert.equal(saved.revision, revision)
+  assert.equal(saved.username, undefined)
+  assert.equal(saved.password, undefined)
+  await fixture.context.refreshMissingIcons()
+  assert.equal(writes().length, 1)
+  revision = 'session-b'
+  await fixture.context.refreshMissingIcons()
+  assert.equal(writes().length, 2)
+  revision = 'session-c'
+  unavailable = true
+  await fixture.context.refreshMissingIcons()
+  const attempts = fixture.messages.length
+  await fixture.context.refreshMissingIcons()
+  assert.equal(fixture.messages.length, attempts + 1, 'backoff only checks the missing list')
+})
+
 test('inline raster icons are normalized while oversized and active data URLs are rejected', async () => {
   const fixture = background()
   const inline = `data:image/png;base64,${png.toString('base64')}`
@@ -428,6 +686,49 @@ test('inline raster icons are normalized while oversized and active data URLs ar
     assert.equal(await fixture.context.loadSiteIcon(value), '')
   }
   assert.equal(fixture.messages.length, fetched)
+})
+
+test('background never takes a different named project icon from an open tab on the same port', async () => {
+  const fixture = background({
+    siteIconsFetch: async (_url, config) =>
+      config.method === 'POST'
+        ? new Response(JSON.stringify({ ok: true }))
+        : new Response(
+            JSON.stringify({
+              ok: true,
+              revision: 'projects',
+              sites: [
+                {
+                  id: 12,
+                  identity: '10.0.15.33:3000',
+                  site_url: 'http://10.0.15.33:3000',
+                  project_name: 'Project A'
+                }
+              ]
+            })
+          ),
+    iconFetch: async () => new Response('', { status: 404 })
+  })
+  fixture.context.chrome.tabs.query = async () => [
+    { id: 7, url: 'http://10.0.15.33:3000/dashboard' }
+  ]
+  const requested = []
+  fixture.context.chrome.tabs.sendMessage = async (_id, message) => {
+    requested.push(message.type)
+    if (message.type === 'LP_SITE_METADATA')
+      return {
+        page_url: 'http://10.0.15.33:3000/dashboard',
+        project_name: 'Project B',
+        icon_url: 'http://10.0.15.33:3000/b.png'
+      }
+    throw new Error('Must not ask the other project for its image')
+  }
+  await fixture.context.refreshMissingIcons()
+  assert.deepEqual(requested, ['LP_SITE_METADATA'])
+  assert.equal(
+    fixture.messages.some((message) => message.url.endsWith('/b.png')),
+    false
+  )
 })
 
 test('a login failure while loading the icon cancels the pending capture', async () => {

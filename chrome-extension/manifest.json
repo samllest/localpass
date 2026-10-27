@@ -1,20 +1,21 @@
 {
   "manifest_version": 3,
   "name": "LocalPass Auto Capturer",
-  "version": "1.3.7",
+  "version": "1.4.3",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "description": "Automatically captures login form submissions and pushes them to LocalPass.",
+  "description": "Captures successful login and registration credentials and saves them to LocalPass.",
   "permissions": [
     "nativeMessaging",
     "webRequest",
     "storage",
     "tabs",
     "favicon",
+    "offscreen",
     "alarms",
     "scripting"
   ],
@@ -32,6 +33,13 @@
       "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["network-observer.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
     }
   ]
 }

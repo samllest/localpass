@@ -1,12 +1,13 @@
 import Database from 'better-sqlite3'
-import { randomBytes } from 'crypto'
+import { randomBytes, pbkdf2Sync } from 'crypto'
 import { join } from 'path'
 import { existsSync } from 'fs'
 
 import { getDbDir } from './storage.js'
 import { decryptSecret, deriveBackupKey, deriveVaultKey, encryptSecret } from './vault-crypto.js'
-import { normalizeSiteMetadata } from '../shared/site-metadata.js'
+import { normalizeSiteMetadata, safeIconData, websiteAddress } from '../shared/site-metadata.js'
 import { isDevelopmentSite, projectKey } from '../shared/project-matching.js'
+import { parseTotp, totpCode } from './totp.js'
 
 let db = null
 let masterKey = null
@@ -243,6 +244,12 @@ export function initDB(dbFilename, { createIfMissing = false } = {}) {
         if (!columns.has(column))
           db.exec(`ALTER TABLE apps ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`)
       }
+      for (const column of ['notes', 'tags', 'deleted_at', 'totp_blob', 'totp_iv']) {
+        if (!columns.has(column))
+          db.exec(`ALTER TABLE apps ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`)
+      }
+      if (!columns.has('favorite'))
+        db.exec('ALTER TABLE apps ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0')
     })()
     db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_identity ON apps(identity);`)
 
@@ -282,7 +289,7 @@ function migrateUniqueIdentityConstraint() {
 }
 
 export function findAppByIdentity(identity, username, project) {
-  ensureVaultOpen()
+  ensureUnlocked()
 
   const normalizedIdentity = normalizeText(identity).trim()
   if (!normalizedIdentity) {
@@ -297,7 +304,7 @@ export function findAppByIdentity(identity, username, project) {
               c.version_tag, c.captured_at
        FROM apps a
        LEFT JOIN credentials c ON c.app_id = a.id AND c.is_latest = 1
-       WHERE a.identity = ?
+       WHERE a.identity = ? AND a.deleted_at = ''
          AND ((c.username = ?) OR (c.username IS NULL AND ? IS NULL))
        ORDER BY a.id DESC`
     )
@@ -311,15 +318,16 @@ export function findAppByIdentity(identity, username, project) {
 }
 
 export function listApps() {
-  ensureVaultOpen()
+  ensureUnlocked()
 
   return db
     .prepare(
-      `SELECT a.id, a.id AS app_id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data, a.project_name,
+      `SELECT a.id, a.identity, a.display_name, a.category, a.created_at, a.site_name, a.page_title, a.site_url, a.icon_data, a.project_name, a.notes, a.tags, a.favorite, (a.totp_blob != '') AS has_totp, a.id AS app_id,
               c.id AS credential_id, c.username, c.password_blob, c.iv,
               c.version_tag, c.captured_at
        FROM apps a
        LEFT JOIN credentials c ON c.app_id = a.id AND c.is_latest = 1
+       WHERE a.deleted_at = ''
        ORDER BY a.id DESC`
     )
     .all()
@@ -327,7 +335,7 @@ export function listApps() {
 }
 
 export function searchApps(query) {
-  ensureVaultOpen()
+  ensureUnlocked()
 
   const normalizedQuery = normalizeText(query).trim()
   if (!normalizedQuery) {
@@ -340,7 +348,7 @@ export function searchApps(query) {
               c.username, c.password_blob, c.iv, c.version_tag, c.captured_at
        FROM apps a
        LEFT JOIN credentials c ON c.app_id = a.id AND c.is_latest = 1
-       WHERE CAST(a.id AS TEXT) LIKE ? OR a.display_name LIKE ? OR a.identity LIKE ?
+       WHERE a.deleted_at = '' AND (CAST(a.id AS TEXT) LIKE ? OR a.display_name LIKE ? OR a.identity LIKE ?)
        ORDER BY a.id DESC`
     )
     .all(`%${normalizedQuery}%`, `%${normalizedQuery}%`, `%${normalizedQuery}%`)
@@ -386,7 +394,21 @@ export function createApp({
       site.icon_data,
       site.project_name
     )
+    if (metadata.totp_secret) {
+      const encryptedTotp = encrypt(JSON.stringify(parseTotp(metadata.totp_secret)))
+      db.prepare('UPDATE apps SET totp_blob = ?, totp_iv = ? WHERE id = ?').run(
+        encryptedTotp.blob,
+        encryptedTotp.iv,
+        appResult.lastInsertRowid
+      )
+    }
     insertCred.run(appResult.lastInsertRowid, storedUsername, blob, iv)
+    db.prepare('UPDATE apps SET notes = ?, tags = ?, favorite = ? WHERE id = ?').run(
+      normalizeText(metadata.notes).slice(0, 8000),
+      normalizeText(metadata.tags).slice(0, 1000),
+      metadata.favorite ? 1 : 0,
+      appResult.lastInsertRowid
+    )
     return appResult.lastInsertRowid
   })()
 }
@@ -423,7 +445,7 @@ export function updateApp({
   }
 
   const existingApp = db.prepare(`SELECT * FROM apps WHERE id = ?`).get(appId)
-  if (!existingApp) {
+  if (!existingApp || existingApp.deleted_at) {
     throw new Error('App not found')
   }
 
@@ -444,7 +466,30 @@ export function updateApp({
   )
 
   return db.transaction(() => {
+    if (metadata.totp_secret !== undefined) {
+      const encryptedTotp = metadata.totp_secret
+        ? encrypt(JSON.stringify(parseTotp(metadata.totp_secret)))
+        : { blob: '', iv: '' }
+      db.prepare('UPDATE apps SET totp_blob = ?, totp_iv = ? WHERE id = ?').run(
+        encryptedTotp.blob,
+        encryptedTotp.iv,
+        appId
+      )
+    }
+    db.prepare('UPDATE apps SET notes = ?, tags = ?, favorite = ? WHERE id = ?').run(
+      normalizeText(metadata.notes ?? existingApp.notes).slice(0, 8000),
+      normalizeText(metadata.tags ?? existingApp.tags).slice(0, 1000),
+      (metadata.favorite ?? existingApp.favorite) ? 1 : 0,
+      appId
+    )
     const metadataChanged =
+      metadata.totp_secret !== undefined ||
+      (metadata.notes !== undefined &&
+        normalizeText(metadata.notes).slice(0, 8000) !== existingApp.notes) ||
+      (metadata.tags !== undefined &&
+        normalizeText(metadata.tags).slice(0, 1000) !== existingApp.tags) ||
+      (metadata.favorite !== undefined &&
+        Number(Boolean(metadata.favorite)) !== existingApp.favorite) ||
       existingApp.identity !== nextAppFields.identity ||
       existingApp.display_name !== nextAppFields.display_name ||
       existingApp.category !== nextAppFields.category ||
@@ -503,16 +548,134 @@ export function updateApp({
 }
 
 export function deleteApp(app_id) {
-  ensureVaultOpen()
+  ensureUnlocked()
+  db.prepare("UPDATE apps SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at = ''").run(
+    app_id
+  )
+}
 
-  db.transaction(() => {
-    db.prepare(`DELETE FROM credentials WHERE app_id = ?`).run(app_id)
-    db.prepare(`DELETE FROM apps WHERE id = ?`).run(app_id)
+export function listTrash() {
+  ensureUnlocked()
+  return db
+    .prepare(
+      "SELECT id, display_name, identity, deleted_at FROM apps WHERE deleted_at != '' ORDER BY deleted_at DESC"
+    )
+    .all()
+}
+
+export function restoreApp(id) {
+  ensureUnlocked()
+  return (
+    db.prepare("UPDATE apps SET deleted_at = '' WHERE id = ? AND deleted_at != ''").run(id)
+      .changes > 0
+  )
+}
+
+export function purgeTrash() {
+  ensureUnlocked()
+  return db
+    .prepare("DELETE FROM apps WHERE deleted_at != '' AND deleted_at < datetime('now', '-30 days')")
+    .run().changes
+}
+
+export function importBrowserRecords(records) {
+  ensureUnlocked()
+  return db.transaction(() => {
+    let imported = 0,
+      duplicates = 0,
+      conflicts = 0
+    for (const record of records) {
+      const matches = listCredentialsByIdentity(record.identity).filter(
+        (row) => normalizeUsername(row.username) === normalizeUsername(record.username)
+      )
+      if (matches.some((row) => row.password === record.password)) {
+        duplicates++
+        continue
+      }
+      if (matches.length) conflicts++
+      createApp(record)
+      imported++
+    }
+    return { imported, duplicates, conflicts }
   })()
 }
 
+export function changeVaultMasterPassword({ username, dbFilename, salt }, nextPassword) {
+  ensureUnlocked()
+  if (typeof nextPassword !== 'string' || nextPassword.length < 12)
+    throw new Error('新主密码至少需要 12 个字符')
+  const nextSalt = randomBytes(16).toString('hex')
+  const nextKey = deriveVaultKey(nextPassword, nextSalt)
+  const nextHash = pbkdf2Sync(nextPassword, nextSalt, 100000, 64, 'sha512').toString('hex')
+  const encrypted = db
+    .prepare('SELECT id, password_blob, iv FROM credentials')
+    .all()
+    .map((row) => ({
+      id: row.id,
+      ...encryptSecret(decryptOrThrow(row.password_blob, row.iv), nextKey)
+    }))
+  const totpRows = db
+    .prepare("SELECT id, totp_blob, totp_iv FROM apps WHERE totp_blob != ''")
+    .all()
+    .map((row) => ({
+      id: row.id,
+      ...encryptSecret(decryptOrThrow(row.totp_blob, row.totp_iv), nextKey)
+    }))
+  let catalogAttached = false
+  try {
+    db.pragma('wal_checkpoint(TRUNCATE)')
+    if (db.pragma('journal_mode = DELETE', { simple: true }) !== 'delete')
+      throw new Error('无法建立安全的密码修改事务')
+    db.prepare('ATTACH DATABASE ? AS account_catalog').run(join(getDbDir(), 'system.db'))
+    catalogAttached = true
+    if (db.pragma('account_catalog.journal_mode = DELETE', { simple: true }) !== 'delete')
+      throw new Error('账号目录正忙，请稍后重试')
+    db.pragma('synchronous = FULL')
+    db.pragma('account_catalog.synchronous = FULL')
+    db.transaction(() => {
+      const account = db
+        .prepare('SELECT salt, db_filename FROM account_catalog.users WHERE username = ?')
+        .get(username)
+      if (
+        !account ||
+        account.salt !== salt ||
+        account.db_filename !== dbFilename ||
+        join(getDbDir(), dbFilename) !== currentDbPath
+      )
+        throw new Error('密码库会话已变化')
+      for (const row of encrypted)
+        db.prepare('UPDATE credentials SET password_blob = ?, iv = ? WHERE id = ?').run(
+          row.blob,
+          row.iv,
+          row.id
+        )
+      for (const row of totpRows)
+        db.prepare('UPDATE apps SET totp_blob = ?, totp_iv = ? WHERE id = ?').run(
+          row.blob,
+          row.iv,
+          row.id
+        )
+      db.prepare(
+        'UPDATE account_catalog.users SET salt = ?, master_password_hash = ? WHERE username = ?'
+      ).run(nextSalt, nextHash, username)
+    })()
+    masterKey.fill(0)
+    masterKey = nextKey
+    vaultRevision++
+  } catch (error) {
+    nextKey.fill(0)
+    throw error
+  } finally {
+    if (catalogAttached) {
+      db.pragma('account_catalog.journal_mode = WAL')
+      db.exec('DETACH DATABASE account_catalog')
+    }
+    db.pragma('journal_mode = WAL')
+  }
+}
+
 export function getHistory(app_id) {
-  ensureVaultOpen()
+  ensureUnlocked()
 
   return db
     .prepare(
@@ -523,6 +686,15 @@ export function getHistory(app_id) {
     )
     .all(app_id)
     .map(mapCredentialRow)
+}
+
+export function getTotpCode(id) {
+  ensureUnlocked()
+  const row = db
+    .prepare("SELECT totp_blob, totp_iv FROM apps WHERE id = ? AND deleted_at = ''")
+    .get(id)
+  if (!row?.totp_blob) return null
+  return totpCode(JSON.parse(decryptOrThrow(row.totp_blob, row.totp_iv)))
 }
 
 export function listCredentialsByIdentity(identity) {
@@ -538,11 +710,48 @@ export function listCredentialsByIdentity(identity) {
               c.version_tag, c.captured_at
        FROM apps a
        INNER JOIN credentials c ON c.app_id = a.id AND c.is_latest = 1
-       WHERE a.identity = ?
+       WHERE a.identity = ? AND a.category = 'web' AND a.deleted_at = ''
        ORDER BY c.username COLLATE NOCASE`
     )
     .all(normalizedIdentity)
     .map(mapCredentialRow)
+}
+
+// Icon maintenance never reads credentials or adds a password history version.
+export function listMissingSiteIcons() {
+  ensureUnlocked()
+  return db
+    .prepare(
+      `SELECT id, identity, display_name, category, site_name, page_title, project_name, site_url, icon_data
+     FROM apps WHERE category = 'web' AND deleted_at = '' ORDER BY id`
+    )
+    .all()
+    .filter((row) => !safeIconData(row.icon_data) && websiteAddress(row.site_url || row.identity))
+    .map((row) => {
+      const site = { ...row }
+      delete site.icon_data
+      return site
+    })
+}
+
+export function fillMissingSiteIcon({ id, identity, project_name, icon_data }) {
+  ensureUnlocked()
+  const icon = safeIconData(icon_data)
+  if (!icon) return false
+  const existing = db.prepare('SELECT * FROM apps WHERE id = ? AND category = ?').get(id, 'web')
+  if (
+    !existing ||
+    existing.deleted_at ||
+    existing.identity !== identity ||
+    safeIconData(existing.icon_data) ||
+    projectKey(existing) !== projectKey({ project_name })
+  )
+    return false
+  return (
+    db
+      .prepare('UPDATE apps SET icon_data = ? WHERE id = ? AND icon_data = ?')
+      .run(icon, id, existing.icon_data).changes > 0
+  )
 }
 
 export function exportVaultData(passphrase) {
@@ -561,9 +770,25 @@ export function exportVaultData(passphrase) {
     icon_data: record.icon_data,
     project_name: record.project_name,
     username: record.username,
-    password: record.password
+    password: record.password,
+    notes: record.notes,
+    tags: record.tags,
+    favorite: record.favorite,
+    totp_secret: record.has_totp
+      ? (() => {
+          const row = db.prepare('SELECT totp_blob, totp_iv FROM apps WHERE id = ?').get(record.id)
+          const config = JSON.parse(decryptOrThrow(row.totp_blob, row.totp_iv))
+          return `otpauth://totp/LocalPass?${new URLSearchParams(config)}`
+        })()
+      : '',
+    history: getHistory(record.id).map(({ username, password, version_tag, captured_at }) => ({
+      username,
+      password,
+      version_tag,
+      captured_at
+    }))
   }))
-  const payload = JSON.stringify({ format: 'localpass-export', version: 1, records })
+  const payload = JSON.stringify({ format: 'localpass-export', version: 2, records })
   const salt = randomBytes(16).toString('base64')
   const { blob, iv } = encryptSecret(payload, deriveBackupKey(passphrase, salt))
 
@@ -621,38 +846,80 @@ export function importVaultData(serialized, passphrase) {
 
   let imported = 0
   const importedIds = new Set()
-  for (const record of payload.records) {
-    const identity = normalizeText(record.identity).trim()
-    const password = normalizeText(record.password)
-    if (!identity || !password) continue
+  return db.transaction(() => {
+    for (const record of payload.records) {
+      const identity = normalizeText(record.identity).trim()
+      const password = normalizeText(record.password)
+      if (!identity || !password) continue
 
-    const username = normalizeUsername(record.username)
-    const existing = isDevelopmentSite(identity)
-      ? listCredentialsByIdentity(identity).find(
-          (candidate) =>
-            !importedIds.has(candidate.app_id) &&
-            projectKey(candidate) === projectKey(record) &&
-            normalizeUsername(candidate.username) === username &&
-            candidate.password === password
-        )
-      : findAppByIdentity(identity, username, record)
-    if (existing) {
-      const id = existing.id ?? existing.app_id
-      updateApp({ ...record, app_id: id, identity, username, password })
-      importedIds.add(id)
-    } else {
-      const id = createApp({
-        ...record,
-        identity,
-        display_name: normalizeText(record.display_name).trim() || identity,
-        category: record.category,
-        username,
-        password
-      })
-      importedIds.add(Number(id))
+      const username = normalizeUsername(record.username)
+      const existing = (
+        record.category === 'app' ? listApps() : listCredentialsByIdentity(identity)
+      ).find(
+        (candidate) =>
+          candidate.identity === identity && candidate.category === (record.category === 'app' ? 'app' : 'web') &&
+          !importedIds.has(candidate.app_id) &&
+          projectKey(candidate) === projectKey(record) &&
+          normalizeUsername(candidate.username) === username &&
+          candidate.password === password
+      )
+      let targetId
+      if (existing) {
+        const id = existing.id ?? existing.app_id
+        targetId = Number(id)
+        updateApp({ ...record, app_id: id, identity, username, password })
+        importedIds.add(id)
+      } else {
+        const id = createApp({
+          ...record,
+          identity,
+          display_name: normalizeText(record.display_name).trim() || identity,
+          category: record.category,
+          username,
+          password
+        })
+        targetId = Number(id)
+        importedIds.add(Number(id))
+      }
+      if (Array.isArray(record.history)) {
+        if (record.history.length > 10000) throw new Error('密码历史过多，已取消导入')
+        const ordered = [...record.history]
+          .filter((item) => typeof item.password === 'string' && item.password)
+          .sort((a, b) => a.version_tag - b.version_tag)
+        if (ordered.length) {
+          if (
+            ordered.at(-1).password !== password ||
+            normalizeUsername(ordered.at(-1).username) !== username
+          )
+            throw new Error('最新密码与历史不一致，已取消导入')
+          if (existing) {
+            const current = getHistory(targetId)
+            const latest = current.find((row) => row.is_latest)
+            const missing = ordered.filter((item) => !current.some((row) => row.password === item.password && normalizeUsername(row.username) === normalizeUsername(item.username) && row.captured_at === item.captured_at))
+            if (!missing.length) { imported++; continue }
+            const history = [...current.filter((row) => !row.is_latest), ...missing.filter((row) => !(row.password === latest.password && normalizeUsername(row.username) === normalizeUsername(latest.username)))].sort((a, b) => String(a.captured_at).localeCompare(String(b.captured_at)))
+            ordered.splice(0, ordered.length, ...history, latest)
+          }
+          db.prepare('DELETE FROM credentials WHERE app_id = ?').run(targetId)
+        }
+        for (const [index, item] of ordered.entries()) {
+          const encrypted = encrypt(item.password)
+          db.prepare(
+            'INSERT INTO credentials (app_id, username, password_blob, iv, version_tag, is_latest, captured_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          ).run(
+            targetId,
+            normalizeUsername(item.username),
+            encrypted.blob,
+            encrypted.iv,
+            index + 1,
+            index === ordered.length - 1 ? 1 : 0,
+            item.captured_at || new Date().toISOString()
+          )
+        }
+      }
+      imported += 1
     }
-    imported += 1
-  }
 
-  return imported
+    return imported
+  })()
 }

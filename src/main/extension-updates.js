@@ -16,7 +16,11 @@ import { normalizeUpdateUrl } from './updates.js'
 export const EXTENSION_FILES = [
   'manifest.json',
   'background.js',
+  'bridge-config.js',
   'content.js',
+  'network-observer.js',
+  'icon-offscreen.html',
+  'icon-offscreen.js',
   'popup.html',
   'popup.css',
   'popup.js',
@@ -76,7 +80,10 @@ export function validateExtensionPackage(bundle) {
 export async function packExtension(directory) {
   const files = {}
   for (const name of EXTENSION_FILES) {
-    const bytes = await readFile(join(directory, name))
+    const bytes =
+      name === 'bridge-config.js'
+        ? Buffer.from("globalThis.LP_BRIDGE_TOKEN = ''\n")
+        : await readFile(join(directory, name))
     files[name] = {
       content: bytes.toString('base64'),
       sha256: createHash('sha256').update(bytes).digest('hex')
@@ -100,7 +107,7 @@ async function installedVersion(folder) {
 
 // Swap complete folders only after all files have been staged. Preserve unrelated
 // files in an existing installation and restore the original on rename failure.
-async function installPackage(folder, bundle) {
+async function installPackage(folder, bundle, bridgeSecret) {
   const { files } = validateExtensionPackage(bundle)
   await mkdir(dirname(folder), { recursive: true })
   let exists = false
@@ -132,6 +139,12 @@ async function installPackage(folder, bundle) {
       await mkdir(dirname(join(staging, name)), { recursive: true })
       await writeFile(join(staging, name), bytes)
     }
+    if (bridgeSecret)
+      await writeFile(
+        join(staging, 'bridge-config.js'),
+        `globalThis.LP_BRIDGE_TOKEN = '${bridgeSecret}'\n`,
+        { mode: 0o600 }
+      )
     if (exists) {
       await rename(folder, backup)
       moved = true
@@ -153,7 +166,8 @@ export function createExtensionUpdateManager({
   sourceFolder,
   dataFolder,
   serverUrl,
-  fetchPackage = fetch
+  fetchPackage = fetch,
+  bridgeSecret
 }) {
   const cacheFolder = join(dataFolder, 'browser-extension')
   const settingsFile = join(dataFolder, 'extension-update-settings.json')
@@ -177,7 +191,13 @@ export function createExtensionUpdateManager({
       if (error.code !== 'ENOENT') throw error
     }
     if (!version || compareExtensionVersions(latest.version, version) > 0)
-      await installPackage(folder, latest)
+      await installPackage(folder, latest, bridgeSecret)
+    if (bridgeSecret)
+      await writeFile(
+        join(folder, 'bridge-config.js'),
+        `globalThis.LP_BRIDGE_TOKEN = '${bridgeSecret}'\n`,
+        { mode: 0o600 }
+      )
   }
   return {
     snapshot,
@@ -214,7 +234,7 @@ export function createExtensionUpdateManager({
         await installedVersion(folder)
         if (compareExtensionVersions(await installedVersion(folder), latest.version) > 0)
           throw new Error('所选扩展比下载站版本更新，已保留原文件')
-        await installPackage(folder, latest)
+        await installPackage(folder, latest, bridgeSecret)
         await writeFile(settingsFile + '.tmp', JSON.stringify({ folder }), 'utf8')
         await rename(settingsFile + '.tmp', settingsFile)
         targetFolder = folder
@@ -245,7 +265,7 @@ export function createExtensionUpdateManager({
         validateExtensionPackage(bundle)
         const newer = compareExtensionVersions(bundle.version, latest.version) > 0
         if (newer) {
-          await installPackage(cacheFolder, bundle)
+          await installPackage(cacheFolder, bundle, bridgeSecret)
           latest = bundle
         }
         await ensureLatest(targetFolder)

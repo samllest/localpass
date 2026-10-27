@@ -75,13 +75,43 @@ test('multiple accounts in the same project return to the browser picker without
   assert.deepEqual(result, { accounts: [record, duplicate], selected: false })
 })
 
-test('changed passwords ask before overwriting and can be saved separately; selected records bypass a second prompt', async () => {
+test('changed passwords are saved separately without prompts; selected records update only the selected account', async () => {
   const payload = { username: 'admin', password: 'changed-secret' }
   assert.equal(await resolveProjectCapture([record], site, payload, async () => 'new'), null)
-  assert.equal(await resolveProjectCapture([record], site, payload, async () => null), false)
-  assert.equal(await resolveProjectCapture([record], site, payload, async () => 1), record)
+  assert.equal(await resolveProjectCapture([record], site, payload, noChoice), null)
   assert.equal(await resolveProjectCapture([record], site, payload, noChoice, 1), record)
   assert.equal(await resolveProjectCapture([record], site, payload, noChoice, 99), false)
+})
+
+test('password changes associate a unique old password while ambiguous/public matches stay separate', async () => {
+  const publicSite = { identity: 'example.com' }
+  assert.equal(
+    await resolveProjectCapture(
+      [record],
+      publicSite,
+      { username: 'admin', password: 'new' },
+      noChoice
+    ),
+    null
+  )
+  assert.equal(
+    await resolveProjectCapture(
+      [record],
+      site,
+      { capture_kind: 'password-change', previous_password: record.password, password: 'new' },
+      noChoice
+    ),
+    record
+  )
+  assert.equal(
+    await resolveProjectCapture(
+      [record, { ...record, app_id: 99 }],
+      site,
+      { capture_kind: 'password-change', previous_password: record.password, password: 'new' },
+      noChoice
+    ),
+    null
+  )
 })
 
 test('missing names and legacy records also use the browser picker; public website lookup is unchanged', async () => {

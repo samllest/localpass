@@ -142,6 +142,9 @@ if (!process.versions.electron) {
       console.log('PASS legacy v1 backups remain importable on the original vault')
       const icon =
         'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+      const { DEFAULT_BROWSER_ICON } = await import(
+        pathToFileURL(path.join(__dirname, '../src/shared/site-metadata.js')).href
+      )
       const record = {
         identity: '10.0.15.33:3000',
         display_name: 'Agent Router',
@@ -173,6 +176,83 @@ if (!process.versions.electron) {
       assert.equal(current.page_title, 'Agent Router · 控制台')
       assert.equal(current.icon_data, icon)
       console.log('PASS metadata refreshes without creating a password version')
+      const missingId = db.createApp({
+        ...record,
+        identity: 'icons.example',
+        site_url: 'https://icons.example',
+        icon_data: '',
+        project_name: 'Icon project',
+        username: 'icon-only'
+      })
+      assert.ok(db.listMissingSiteIcons().some((row) => row.id === missingId))
+      assert.equal('password' in db.listMissingSiteIcons()[0], false)
+      assert.equal(
+        db.fillMissingSiteIcon({
+          id: missingId,
+          identity: 'wrong.example',
+          project_name: 'Icon project',
+          icon_data: icon
+        }),
+        false
+      )
+      assert.equal(
+        db.fillMissingSiteIcon({
+          id: missingId,
+          identity: 'icons.example',
+          project_name: 'Other project',
+          icon_data: icon
+        }),
+        false
+      )
+      assert.equal(
+        db.fillMissingSiteIcon({
+          id: missingId,
+          identity: 'icons.example',
+          project_name: 'Icon project',
+          icon_data: icon
+        }),
+        true
+      )
+      assert.equal(
+        db.fillMissingSiteIcon({
+          id: missingId,
+          identity: 'icons.example',
+          project_name: 'Icon project',
+          icon_data: icon
+        }),
+        false
+      )
+      assert.equal(db.getHistory(missingId).length, 1)
+      assert.equal(db.findAppByIdentity('icons.example', 'icon-only').password, record.password)
+      // Simulate a placeholder cached by a previous release, bypassing normalization.
+      const raw = new Database(db.getVaultInfo().dbPath)
+      raw.prepare('UPDATE apps SET icon_data = ? WHERE id = ?').run(DEFAULT_BROWSER_ICON, missingId)
+      raw.close()
+      assert.ok(db.listMissingSiteIcons().some((row) => row.id === missingId))
+      assert.equal(
+        db.fillMissingSiteIcon({
+          id: missingId,
+          identity: 'icons.example',
+          project_name: 'Icon project',
+          icon_data: DEFAULT_BROWSER_ICON
+        }),
+        false
+      )
+      assert.equal(
+        db.fillMissingSiteIcon({
+          id: missingId,
+          identity: 'icons.example',
+          project_name: 'Icon project',
+          icon_data: icon
+        }),
+        true
+      )
+      assert.equal(db.findAppByIdentity('icons.example', 'icon-only').icon_data, icon)
+      assert.equal(db.getHistory(missingId).length, 1)
+      db.deleteApp(missingId)
+      console.log(
+        'PASS missing icon backfill is scoped to site/project, never reads credentials or changes history'
+      )
       db.updateApp({ app_id: id, display_name: 'My custom label' })
       assert.equal(db.findAppByIdentity(record.identity, record.username).icon_data, icon)
       const backup = db.exportVaultData('Synthetic backup passphrase 2026')

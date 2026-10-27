@@ -23,7 +23,18 @@ Copy-Item -LiteralPath $installer -Destination (Join-Path $site $installerName) 
 Copy-Item -LiteralPath $updateMetadata -Destination (Join-Path $site 'latest.yml') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "dist/release/$blockmapName") -Destination (Join-Path $site $blockmapName) -Force
 $extensionName = "localpass-extension-$extensionVersion.zip"
-Compress-Archive -LiteralPath (Join-Path $projectRoot 'chrome-extension') -DestinationPath (Join-Path $site $extensionName) -Force
+$extensionStage = Join-Path $projectRoot ('out/extension-release-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $extensionStage | Out-Null
+try {
+  & node (Join-Path $projectRoot 'scripts/stage-extension.mjs') (Join-Path $extensionStage 'chrome-extension')
+  if ($LASTEXITCODE -ne 0) { throw 'Failed to stage the public extension.' }
+  Compress-Archive -LiteralPath (Join-Path $extensionStage 'chrome-extension') -DestinationPath (Join-Path $site $extensionName) -Force
+} finally {
+  $resolvedStage = [System.IO.Path]::GetFullPath($extensionStage)
+  $expectedParent = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'out'))
+  if ((Split-Path -Parent $resolvedStage) -ne $expectedParent) { throw 'Invalid extension staging directory.' }
+  Remove-Item -LiteralPath $resolvedStage -Recurse -Force
+}
 & node (Join-Path $projectRoot 'scripts/package-extension.mjs') $site
 if ($LASTEXITCODE -ne 0) { throw 'Failed to create the extension update feed.' }
 $utf8 = [System.Text.UTF8Encoding]::new($false)
@@ -46,7 +57,8 @@ LocalPass $version 使用说明
 密码库在每个使用者自己的电脑上，下载服务器不接收密码。
 Windows 安装版数据库通常位于 %APPDATA%\localpass\vaults。
 更新前请在设置中导出加密备份，卸载或更换电脑前保留完整的数据目录。
-当前加密备份需要原密码库的加密密钥，恢复时应保留原 system.db 与 user_*.db 文件。
+加密 JSON 备份使用独立备份口令，包含账号、完整密码历史与 TOTP，可导入使用不同主密码的新密码库。
+完整目录备份仍需保留原 system.db 与 user_*.db 文件及原主密码。
 已有用户升级桌面端后，在设置“在浏览器中使用”绑定当前扩展文件夹，首次手动重新加载扩展并确认新增权限。
 以后桌面端每15分钟自动下载扩展更新，扩展在空闲时自动重新加载，无需重新解压ZIP。
 新安装直接加载桌面端设置中打开的稳定扩展目录即可；扩展 1.3.7 起会自动接管已打开的网页，保留输入内容；点击登录输入框即可使用。
@@ -56,13 +68,16 @@ Windows 安装版数据库通常位于 %APPDATA%\localpass\vaults。
 如果下载站地址发生变化，在“版本与更新 → 内网更新地址”保存管理员提供的新地址。
 1.4.2 将密码库独立存放在 vaults，隔离浏览器缓存，防止启动时误清理。旧版现存密码库自动迁移。
 应用内更新前自动备份完整本地密码库，备份失败则暂停更新。
-运行中覆盖安装（包括托盘后台运行）结束后会重新启动应用，仍需使用原主密码登录。
+运行中覆盖安装（包括托盘后台运行）结束后会重新启动应用；有效的记住解锁会话会自动恢复。
 关闭窗口时可选择取消、确认关闭或后台运行。后台运行且密码库已解锁时，扩展才能继续保存和填充密码。
 勾选“不再提示”会记住本次退出或后台运行选择 3 天，取消不记忆。可在设置中“恢复关闭提示”。
 托盘菜单可重新打开窗口或退出应用；退出后扩展不会暂存登录密码。
 开发环境按主机、端口和项目名称匹配。项目名称取网站名称，缺失时取标签页标题，可在编辑密码时调整。
 同名项目存在多个账号记录时，直接在网页输入框旁选择账号，不弹出桌面窗口。
-保存时遇到同名账号的不同密码，可确认更新对象或另存为新记录。
+保存时同名不同密码自动保留独立记录，明确选择的账号或唯一旧密码匹配时才更新，保留历史。
+桌面端 $version 与扩展 $extensionVersion 需配套使用，本机连接密钥由桌面端自动写入管理的扩展目录；通用 ZIP 不含密钥，需绑定目录一次。
+Windows 解锁状态记住 31 天，连续 3 天没有桌面操作或浏览器填充、保存密码就锁定；手动锁定立即生效，后台轮询不续期。
+在“设置 → 偏好设置 → 开机自启”可选择登录 Windows 后自动打开，默认关闭；有效会话可自动恢复，过期或手动锁定后需主密码。
 "@
 [System.IO.File]::WriteAllText((Join-Path $site '使用说明.txt'), $guide, $utf8)
 $checksums = @($installerName, $extensionName, 'extension-update.json', 'latest.yml', $blockmapName) | ForEach-Object {

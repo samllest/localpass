@@ -1,16 +1,20 @@
 import { createServer } from 'http'
 import { randomUUID } from 'node:crypto'
+import { authorizeBridgeRequest } from './bridge-auth.js'
 
 import {
   createApp,
   getVaultRevision,
   isVaultUnlocked,
+  listMissingSiteIcons,
+  fillMissingSiteIcon,
   listCredentialsByIdentity,
   updateApp
 } from './db.js'
 import { capturedSite } from '../shared/site-metadata.js'
 import { projectKey, projectName, isDevelopmentSite } from '../shared/project-matching.js'
 import { resolveProjectLookup, resolveProjectCapture } from './project-resolution.js'
+import { UNLOCK_DURATION_MS } from './unlock-session.js'
 
 let webContents = null
 let server = null
@@ -32,7 +36,7 @@ function sendJson(res, status, payload) {
 
 export function initBridgeServer(
   winWebContents,
-  { port = 35320, chooseAccount, extensionStatus } = {}
+  { port = 35320, chooseAccount, extensionStatus, secret, beforeAccess, onActivity } = {}
 ) {
   webContents = winWebContents
   chooseProject = chooseAccount || (async () => null)
@@ -43,23 +47,48 @@ export function initBridgeServer(
 
   const instanceId = randomUUID()
   server = createServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Cache-Control', 'no-store')
+    const origin = req.headers.origin
+    if (origin && /^chrome-extension:\/\/[a-p]{32}$/.test(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Vary', 'Origin')
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 
     if (req.method === 'OPTIONS') {
+      if (!origin || !/^chrome-extension:\/\/[a-p]{32}$/.test(origin))
+        return sendJson(res, 403, { ok: false, error: 'Untrusted origin' })
       res.writeHead(204)
       res.end()
       return
     }
 
     const requestUrl = new URL(req.url || '/', 'http://127.0.0.1')
+    if (!authorizeBridgeRequest(req, secret))
+      return sendJson(res, 401, { ok: false, error: 'Untrusted browser connection' })
+    beforeAccess?.()
+
+    if (req.method === 'GET' && requestUrl.pathname === '/site-icons') {
+      if (!isVaultUnlocked()) return sendJson(res, 423, { ok: false, sites: [] })
+      return sendJson(res, 200, {
+        ok: true,
+        revision: `${instanceId}:${getVaultRevision()}`,
+        sites: listMissingSiteIcons().map((row) => ({
+          id: row.id,
+          identity: row.identity,
+          project_name: projectName(row),
+          site_url: row.site_url || capturedSite(row).site_url
+        }))
+      })
+    }
 
     if (req.method === 'GET' && requestUrl.pathname === '/extension-status') {
       res.setHeader('Cache-Control', 'no-store')
       sendJson(res, 200, {
         ...(extensionStatus?.(requestUrl.searchParams.get('version')) || { ok: false }),
         instanceId,
+        revision: `${instanceId}:${getVaultRevision()}`,
         unlocked: isVaultUnlocked()
       })
       return
@@ -120,7 +149,7 @@ export function initBridgeServer(
           )
           if (!account) return []
           const token = randomUUID()
-          if (isDevelopmentSite(site.identity)) {
+          {
             for (const [key, value] of selections)
               if (value.expires < Date.now()) selections.delete(key)
             if (selections.size >= 500) selections.delete(selections.keys().next().value)
@@ -130,7 +159,7 @@ export function initBridgeServer(
               project: projectKey(site),
               username: account.username || '',
               revision,
-              expires: Date.now() + 300000
+              expires: Date.now() + UNLOCK_DURATION_MS
             })
           }
           return [
@@ -152,7 +181,12 @@ export function initBridgeServer(
       return
     }
 
-    if (req.method !== 'POST' || requestUrl.pathname !== '/capture') {
+    const iconOnly = requestUrl.pathname === '/site-icons'
+    const activityOnly = requestUrl.pathname === '/activity'
+    if (
+      req.method !== 'POST' ||
+      (!iconOnly && !activityOnly && requestUrl.pathname !== '/capture')
+    ) {
       res.writeHead(404)
       res.end('Not Found')
       return
@@ -173,12 +207,35 @@ export function initBridgeServer(
 
     req.on('end', async () => {
       try {
+        beforeAccess?.()
         if (!isVaultUnlocked()) {
           sendJson(res, 423, { ok: false, error: 'Vault locked' })
           return
         }
 
         const payload = JSON.parse(body || '{}')
+        if (activityOnly) {
+          const selection = selections.get(payload.selection_token)
+          if (
+            !selection ||
+            selection.revision !== getVaultRevision() ||
+            selection.expires <= Date.now() ||
+            selection.identity !== payload.identity
+          )
+            return sendJson(res, 409, { ok: false, error: 'Account selection expired' })
+          onActivity?.()
+          return sendJson(res, 200, { ok: true })
+        }
+        if (!iconOnly && payload.vault_revision !== `${instanceId}:${getVaultRevision()}`)
+          return sendJson(res, 409, { ok: false, error: 'Vault session changed' })
+        if (iconOnly) {
+          if (payload.revision !== `${instanceId}:${getVaultRevision()}`)
+            return sendJson(res, 409, { ok: false, error: 'Vault session changed' })
+          const changed = fillMissingSiteIcon(payload)
+          if (changed && webContents && !webContents.isDestroyed())
+            webContents.send('app:refreshList')
+          return sendJson(res, 200, { ok: true, changed })
+        }
         const site = capturedSite(payload)
         const identity = site.identity
         const password = payload.password == null ? '' : String(payload.password)
@@ -188,6 +245,7 @@ export function initBridgeServer(
           sendJson(res, 400, { ok: false, error: 'Invalid payload' })
           return
         }
+        onActivity?.()
 
         const revision = getVaultRevision()
         const valid = () => isVaultUnlocked() && getVaultRevision() === revision
@@ -229,7 +287,10 @@ export function initBridgeServer(
             project_name: existing.project_name || site.project_name,
             icon_data: site.icon_data || existing.icon_data,
             app_id: existing.app_id,
-            username,
+            username:
+              payload.capture_kind === 'password-change' && !username
+                ? existing.username
+                : username,
             password
           })
           changed = result.updated

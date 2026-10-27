@@ -127,6 +127,34 @@
           <span aria-hidden="true">✦</span>生成强密码</button
         ><span v-if="generated" class="field-hint" role="status">已生成 20 位随机密码</span>
       </div>
+      <div class="form-row">
+        <label for="account-notes">备注</label
+        ><input id="account-notes" v-model="form.notes" maxlength="8000" :disabled="saving" />
+      </div>
+      <div class="form-row">
+        <label for="account-tags">标签</label
+        ><input
+          id="account-tags"
+          v-model="form.tags"
+          placeholder="用逗号分隔"
+          maxlength="1000"
+          :disabled="saving"
+        />
+      </div>
+      <label><input v-model="form.favorite" type="checkbox" :disabled="saving" /> 收藏账号</label>
+      <div class="form-row">
+        <label for="account-totp">TOTP 密钥或 otpauth 地址</label
+        ><input
+          id="account-totp"
+          v-model="totpSecret"
+          type="password"
+          autocomplete="off"
+          placeholder="留空保留现有设置"
+          :disabled="saving"
+        /><label v-if="editing?.has_totp"
+          ><input v-model="removeTotp" type="checkbox" :disabled="saving" /> 移除动态验证码</label
+        >
+      </div>
       <p v-if="error" class="form-err" role="alert">{{ error }}</p>
       <footer class="dialog-actions">
         <button
@@ -164,12 +192,17 @@ const form = ref({
   category: initial.category || 'web',
   project_name: projectName(initial),
   username: props.editing?.username || '',
-  password: ''
+  password: '',
+  notes: initial.notes || '',
+  tags: initial.tags || '',
+  favorite: Boolean(initial.favorite)
 })
 const showPassword = ref(false)
 const saving = ref(false)
 const error = ref('')
 const generated = ref(false)
+const totpSecret = ref(''),
+  removeTotp = ref(false)
 const developmentSite = computed(
   () => form.value.category === 'web' && isDevelopmentSite(form.value.identity)
 )
@@ -224,10 +257,15 @@ async function submit() {
     identity,
     category: form.value.category,
     username: form.value.username.trim(),
+    notes: form.value.notes,
+    tags: form.value.tags,
+    favorite: form.value.favorite,
     site_url: siteUrl,
     project_name: developmentSite.value ? form.value.project_name.trim() || display_name : ''
   }
   if (form.value.password) payload.password = form.value.password
+  if (removeTotp.value) payload.totp_secret = ''
+  else if (totpSecret.value.trim()) payload.totp_secret = totpSecret.value.trim()
   saving.value = true
   try {
     if (props.editing)
@@ -244,6 +282,7 @@ async function submit() {
 onMounted(() => window.addEventListener('blur', hidePassword))
 onBeforeUnmount(() => {
   form.value.password = ''
+  totpSecret.value = ''
   window.removeEventListener('blur', hidePassword)
 })
 </script>

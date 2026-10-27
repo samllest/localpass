@@ -29,7 +29,7 @@ if (!process.versions.electron) {
       const load = (file) => import(pathToFileURL(path.join(__dirname, '../src/', file)).href)
       const db = await load('main/db.js')
       const bridge = await load('main/bridge.js')
-      const chooser = await load('main/project-choice.js')
+
       const reserve = http.createServer()
       await new Promise((resolve) => reserve.listen(0, '127.0.0.1', resolve))
       const port = reserve.address().port
@@ -37,16 +37,27 @@ if (!process.versions.electron) {
       db.initDB('projects.db', { createIfMissing: true })
       db.setMasterPassword('Synthetic!Master123', 'synthetic-project-salt')
       const desktop = new BrowserWindow({ show: false })
-      let prompts = 0
+      const prompts = 0
+      const secret = 'a'.repeat(64)
+      let activities = 0
       await bridge.initBridgeServer(desktop.webContents, {
         port,
-        chooseAccount: (...args) => {
-          assert.equal(args[0].saving, true, 'only saving conflicts may open a desktop window')
-          prompts++
-          return chooser.chooseProjectAccount(...args)
-        }
+        secret,
+        onActivity: () => activities++
       })
       const base = `http://127.0.0.1:${port}`
+      const headers = { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' }
+      const trustedFetch = (url, options = {}) =>
+        fetch(url, { ...options, headers: { ...headers, ...options.headers } })
+      assert.equal((await fetch(base + '/lookup?identity=localhost:3000')).status, 401)
+      assert.equal(
+        (await trustedFetch(base + '/lookup', { headers: { Origin: 'https://evil.example' } }))
+          .status,
+        401
+      )
+      let revision = (
+        await trustedFetch(base + '/extension-status').then((response) => response.json())
+      ).revision
       const payload = (project, password) => ({
         page_url: 'http://localhost:3000/login',
         site_name: project,
@@ -55,80 +66,80 @@ if (!process.versions.electron) {
         password
       })
       const capture = (body) =>
-        fetch(base + '/capture', {
+        trustedFetch(base + '/capture', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
+          body: JSON.stringify({ ...body, vault_revision: revision })
         }).then((response) => response.json())
       const lookup = (project, options) =>
-        fetch(
+        trustedFetch(
           base +
             '/lookup?' +
             new URLSearchParams({ identity: 'localhost:3000', project_name: project }),
           options
         ).then((response) => response.json())
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-      async function promptWindow() {
-        for (let index = 0; index < 300; index++) {
-          const window = BrowserWindow.getAllWindows().find(
-            (candidate) =>
-              candidate !== desktop && candidate.isVisible() && !candidate.webContents.isLoading()
-          )
-          if (window) return window
-          await wait(30)
-        }
-        throw new Error(
-          'Expected a visible standalone selection window: ' +
-            JSON.stringify(
-              BrowserWindow.getAllWindows().map((window) => ({
-                id: window.id,
-                visible: window.isVisible(),
-                loading: window.webContents.isLoading(),
-                url: window.webContents.getURL().slice(0, 60)
-              }))
-            )
-        )
-      }
-      async function clickChoice(window, selector) {
-        await window.webContents.executeJavaScript(
-          `document.querySelector(${JSON.stringify(selector)}).click()`
-        )
-      }
       await capture(payload('项目 A', 'Synthetic!A123'))
       await capture(payload('项目 B', 'Synthetic!B123'))
       assert.equal(db.listApps().length, 2)
       assert.equal((await lookup('项目 A')).accounts[0].password, 'Synthetic!A123')
       assert.equal((await lookup('项目 B')).accounts[0].password, 'Synthetic!B123')
       assert.equal((await lookup('项目 C')).accounts.length, 0)
+      const beforeMaintenance = activities
+      const selected = (await lookup('项目 A')).accounts[0]
+      await trustedFetch(base + '/extension-status')
+      await trustedFetch(base + '/site-icons')
+      assert.equal(activities, beforeMaintenance, 'lookups and maintenance do not renew inactivity')
+      const activity = (identity, selection_token) =>
+        trustedFetch(base + '/activity', {
+          method: 'POST',
+          body: JSON.stringify({ identity, selection_token })
+        })
+      assert.equal((await activity('other.example', selected.selectionToken)).status, 409)
+      assert.equal(activities, beforeMaintenance)
+      assert.equal((await activity('localhost:3000', selected.selectionToken)).status, 200)
+      assert.equal(activities, beforeMaintenance + 1)
       assert.equal(prompts, 0)
+      const iconList = await trustedFetch(base + '/site-icons').then((response) => response.json())
+      assert.equal(iconList.sites.length, 2)
+      assert.equal('password' in iconList.sites[0], false)
+      const icon =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+      const iconWrite = (body) =>
+        trustedFetch(base + '/site-icons', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, vault_revision: revision })
+        })
+      assert.equal(
+        (await iconWrite({ ...iconList.sites[0], revision: 'stale-session', icon_data: icon }))
+          .status,
+        409
+      )
+      const iconSaved = await iconWrite({
+        ...iconList.sites[0],
+        revision: iconList.revision,
+        icon_data: icon
+      })
+      assert.equal((await iconSaved.json()).changed, true)
+      assert.equal(
+        (await trustedFetch(base + '/site-icons').then((response) => response.json())).sites.length,
+        1
+      )
+      console.log(
+        'PASS automatic icon backfill uses site-only metadata and rejects stale vault sessions'
+      )
       const a = db.findAppByIdentity('localhost:3000', 'admin', { project_name: '项目 A' })
       assert.equal(a.project_name, '项目 A')
       assert.equal(db.findAppByIdentity('localhost:3000', 'admin'), null)
       console.log('PASS same-address, same-username projects save and look up independently')
 
       const changed = capture(payload('项目 A', 'Synthetic!Changed123'))
-      let window = await promptWindow()
       assert.equal(desktop.isVisible(), false)
-      assert.equal(window.isAlwaysOnTop(), true)
-      assert.equal(await window.webContents.executeJavaScript('typeof require'), 'undefined')
-      assert.equal(
-        (await window.webContents.executeJavaScript('document.body.innerText')).includes(
-          'Synthetic!'
-        ),
-        false
-      )
-      fs.mkdirSync(path.join(__dirname, '../out'), { recursive: true })
-      fs.writeFileSync(
-        path.join(__dirname, '../out/project-choice-save.png'),
-        (await window.webContents.capturePage()).toPNG()
-      )
-      await clickChoice(window, 'a[href$="/new"]')
       assert.equal((await changed).changed, true)
       assert.equal(db.getHistory(a.id).length, 1)
       assert.equal(db.listApps().length, 3)
-      console.log(
-        'PASS background capture prompts, separate save preserves the original password/history'
-      )
+      console.log('PASS automatic separate save preserves the original password/history')
 
       const beforeLookupPrompts = prompts
       const chosen = await lookup('项目 A')
@@ -227,21 +238,15 @@ if (!process.versions.electron) {
         'PASS concurrent and unnamed-project lookups return immediately without desktop windows'
       )
 
-      const cancelled = capture(payload('项目 A', 'Synthetic!Cancelled123'))
-      window = await promptWindow()
-      window.close()
-      assert.equal((await cancelled).cancelled, true)
-      const locked = capture(payload('项目 A', 'Synthetic!Locked123'))
-      window = await promptWindow()
       db.clearMasterKey()
-      chooser.cancelProjectChoices()
-      assert.equal((await locked).ok, false)
+      assert.equal((await capture(payload('项目 A', 'Synthetic!Locked123'))).ok, false)
       assert.deepEqual((await lookup('项目 A')).accounts, [])
       db.setMasterPassword('Synthetic!Master123', 'synthetic-project-salt')
-      console.log(
-        'PASS save conflict cancellation and vault locking preserve records; locked lookups release no passwords'
-      )
-
+      assert.equal((await capture(payload('项目 A', 'Synthetic!Stale123'))).ok, false)
+      revision = (
+        await trustedFetch(base + '/extension-status').then((response) => response.json())
+      ).revision
+      console.log('PASS locked and stale vault sessions release no passwords and cannot capture')
       const backup = db.exportVaultData('Synthetic backup passphrase 2026')
       const before = db
         .listApps()

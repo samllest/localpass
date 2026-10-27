@@ -61,9 +61,14 @@ for (const directory of ['main', 'preload', 'renderer']) {
     recursive: true
   })
 }
-for (const directory of ['chrome-extension', 'build']) {
+for (const directory of ['build']) {
   fs.cpSync(path.join(root, directory), path.join(stage, directory), { recursive: true })
 }
+run(
+  process.execPath,
+  [path.join(root, 'scripts/stage-extension.mjs'), path.join(stage, 'chrome-extension')],
+  root
+)
 // The standalone account chooser embeds these fonts outside the renderer bundle.
 const fontDirectory = 'src/renderer/src/assets/fonts'
 fs.cpSync(path.join(root, fontDirectory), path.join(stage, fontDirectory), { recursive: true })

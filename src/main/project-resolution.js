@@ -12,29 +12,15 @@ export async function resolveProjectLookup(records, site) {
 
 export async function resolveProjectCapture(records, site, payload, choose, selectedId) {
   const username = String(payload.username || '').trim()
-  if (!isDevelopmentSite(site.identity)) {
-    return records.find((row) => String(row.username || '') === username) || null
-  }
   if (selectedId) return records.find((row) => row.app_id === selectedId) || false
-  const matches = matchProject(records, site).filter(
-    (row) => String(row.username || '') === username
-  )
-  const candidates = matches.length
-    ? matches
-    : records.filter((row) => !projectName(row) && String(row.username || '') === username)
-  const accounts = !projectName(site)
-    ? records.filter((row) => String(row.username || '') === username)
-    : candidates
-  if (!accounts.length) return null
-  if (matches.length === 1 && matches[0].password === payload.password) return matches[0]
-  // Even one same-name account might belong to a different project reusing the
-  // address. A changed password must never silently overwrite it.
-  const id = await choose({
-    identity: site.identity,
-    project: projectName(site),
-    accounts,
-    saving: true
-  })
-  if (id === 'new') return null
-  return accounts.find((row) => row.app_id === id) || false
+  const scoped = isDevelopmentSite(site.identity) ? matchProject(records, site) : records
+  const matches = scoped.filter((row) => String(row.username || '') === username)
+  if (payload.capture_kind === 'password-change' && payload.previous_password) {
+    const previous = (username ? matches : scoped).filter(
+      (row) => row.password === payload.previous_password
+    )
+    if (previous.length === 1) return previous[0]
+  }
+  const exact = matches.filter((row) => row.password === payload.password)
+  return exact.length === 1 ? exact[0] : null
 }

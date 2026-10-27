@@ -62,7 +62,7 @@ export async function createStorageSnapshot({
     return destination
   } catch (cause) {
     throw Object.assign(
-      new Error('本地密码库备份失败，更新已暂停。请检查文件是否完整，以及磁盘空间和文件权限。', {
+      new Error('本地密码库备份失败。请检查文件是否完整，以及磁盘空间和文件权限。', {
         cause
       }),
       { code: 'ERR_VAULT_BACKUP' }

@@ -13,10 +13,16 @@ export function websiteAddress(value) {
   }
 }
 
+// Chromium's 32px blank-document favicon is an HTTP 200 image, not a site icon.
+// Keep this fingerprint in sync with background.js (which runs without imports).
+export const DEFAULT_BROWSER_ICON =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABRElEQVR4AeyX4REBMRCFUQEdKIEO6EAJdKADOjAqMDqgAjqgAzqgA967Sdzlstxm5P6t2U1Osnn5rLncXq8jf4YYPsEf8JfSd4jjOnR6kwAocoHEBN6Ha22OQEJzPS51JgFssJQb79EP4N0Gx3Rhd7TcPAlCAphBiLZG84RrbYrAZAgJADqFUay4UDaMT4b4BaDcNwhLhsgNQJokiDYAkiDaAlBD5ADwdwpvQW5c9frfwcOqOt/JAbB1ijf00qnJcQ83QkxgOQB4XhDCZyLYoPaFB1wwlAOAgks0TacmQmLLBRArK0cMwDJgGbAMWAYsA5YBKQO+sIiKB+UTVgrzFVE0JwFcXRRf0b4udDGajj9k5QKPrv90EsACs8wCXzZZz0l1XsoY37CpRU1WTpAvTQJgJTtGyAH+t0GAG5/RU5PauCztDQAA///3JTG8AAAABklEQVQDAGm4Uc19dK5XAAAAAElFTkSuQmCC'
+
 export function safeIconData(value) {
   const icon = String(value || '')
   // Only small local raster images; no remote URLs or inline SVG in the vault UI.
-  return icon.length <= 24576 &&
+  return icon !== DEFAULT_BROWSER_ICON &&
+    icon.length <= 24576 &&
     /^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/.test(icon)
     ? icon
     : ''

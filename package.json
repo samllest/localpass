@@ -1,6 +1,6 @@
 {
   "name": "localpass",
-  "version": "1.4.8",
+  "version": "1.5.2",
   "description": "LocalPass 本地加密密码管理器与浏览器登录助手",
   "main": "./out/main/index.js",
   "author": "samllest",
@@ -11,6 +11,7 @@
     "test": "node --test",
     "test:extension": "node scripts/verify-extension.cjs",
     "test:site-data": "node scripts/verify-site-data.cjs",
+    "test:automation": "node scripts/verify-automation.cjs",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -23,6 +24,7 @@
     "build:linux": "npm run build && electron-builder --linux",
     "test:update-session": "node scripts/verify-update-session.cjs",
     "test:startup": "npm run build && node scripts/verify-startup.cjs",
+    "test:login-item": "node scripts/verify-login-item.cjs",
     "test:projects": "node scripts/verify-project-matching.cjs",
     "test:updates": "node scripts/verify-updates.cjs",
     "test:storage-lifecycle": "node scripts/verify-storage-lifecycle.cjs",

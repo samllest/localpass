@@ -56,6 +56,17 @@
         </button>
       </div>
       <div class="detail-scroll">
+        <div v-if="selected === 'leaked'" class="credential-card dialog-body">
+          <p>
+            启用后向 Pwned Passwords 发送密码 SHA-1 的前 5
+            位。完整密码、用户名、网址和剩余哈希均留在本机。此检查无法判断网站是否启用两步验证。
+          </p>
+          <button class="button button-outline" :disabled="breachBusy" @click="checkBreaches">
+            {{ breachBusy ? '检查中…' : '启用并检查泄露密码' }}
+          </button>
+          <p v-if="breachError" role="alert">{{ breachError }}</p>
+          <p v-if="breachChecked">检查时间：{{ breachChecked }}</p>
+        </div>
         <div class="detail-title">
           <span class="site-avatar large"><UiIcon :name="current?.icon || 'shield-check'" /></span>
           <div>
@@ -103,7 +114,7 @@
         </div>
         <div v-else class="checkup-empty credential-card">
           {{
-            ['leaked', 'two-factor', 'score'].includes(selected)
+            ['two-factor', 'score'].includes(selected) || (selected === 'leaked' && !breachChecked)
               ? '尚未接入此项检测，无法提供检测结果。'
               : report.total
                 ? '未发现此类问题。'
@@ -118,7 +129,7 @@
           </div>
           <div>
             <dt>检查说明</dt>
-            <dd>泄露库与两步验证状态尚未检测</dd>
+            <dd>泄露检查按需启用；保存 TOTP 密钥不能证明网站已启用两步验证</dd>
           </div>
         </dl>
         <footer class="credential-actions">
@@ -127,7 +138,7 @@
             重新检查
           </button>
         </footer>
-        <p class="page-footnote">数据仅在本机分析，不会上传</p>
+        <p class="page-footnote">强度与重复检查在本机进行；泄露检查仅发送哈希前缀</p>
       </div>
     </section>
   </div>
@@ -147,6 +158,23 @@ defineEmits(['select-account', 'refresh'])
 const selected = ref('overview')
 const mobileDetail = ref(false)
 const category = ref('all')
+const breachedIds = ref([]),
+  breachBusy = ref(false),
+  breachError = ref(''),
+  breachChecked = ref('')
+async function checkBreaches() {
+  breachBusy.value = true
+  breachError.value = ''
+  try {
+    const result = await window.localpass.checkPasswordBreaches()
+    breachedIds.value = result.leaked
+    breachChecked.value = new Date(result.checkedAt).toLocaleString()
+  } catch (error) {
+    breachError.value = error.message
+  } finally {
+    breachBusy.value = false
+  }
+}
 const categories = [
   { id: 'all', label: '全部' },
   { id: 'web', label: '网站' },
@@ -183,13 +211,24 @@ const checks = computed(() => [
     icon: 'nav-recent',
     count: old.value.length
   },
-  { id: 'leaked', title: '已泄露密码', subtitle: '尚未接入泄露数据库检测', icon: 'shield' },
+  {
+    id: 'leaked',
+    title: '已泄露密码',
+    subtitle: breachChecked.value
+      ? `${breachedIds.value.length} 个账号命中泄露库`
+      : '按需启用哈希前缀查询',
+    icon: 'shield'
+  },
   { id: 'two-factor', title: '两步验证', subtitle: '尚未检测账号的 2FA 状态', icon: 'lock' },
   { id: 'score', title: '安全评分', subtitle: '完整检测接入后提供', icon: 'shield-check' }
 ])
 const current = computed(() => checks.value.find((c) => c.id === selected.value))
 const accounts = computed(() =>
-  selected.value === 'old' ? old.value : report.value[selected.value] || []
+  selected.value === 'leaked'
+    ? filtered.value.filter((record) => breachedIds.value.includes(recordId(record)))
+    : selected.value === 'old'
+      ? old.value
+      : report.value[selected.value] || []
 )
 function select(id) {
   selected.value = id

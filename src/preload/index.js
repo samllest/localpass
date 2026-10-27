@@ -9,6 +9,8 @@ const api = {
   close: () => ipcRenderer.send('window:close'),
   getClosePreference: () => ipcRenderer.invoke('window:closePreference'),
   resetClosePreference: () => ipcRenderer.invoke('window:resetClosePreference'),
+  getStartupState: () => ipcRenderer.invoke('startup:state'),
+  setStartupEnabled: (enabled) => ipcRenderer.invoke('startup:setEnabled', enabled),
   getUpdateState: () => ipcRenderer.invoke('updates:state'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   downloadUpdate: () => ipcRenderer.invoke('updates:download'),
@@ -21,6 +23,25 @@ const api = {
   },
 
   getAuthSession: () => ipcRenderer.invoke('auth:session'),
+  recordActivity: () => ipcRenderer.send('auth:activity'),
+  onLocked: (callback) => {
+    const listener = () => callback()
+    ipcRenderer.on('auth:locked', listener)
+    return () => ipcRenderer.removeListener('auth:locked', listener)
+  },
+  getBackupState: () => ipcRenderer.invoke('backup:state'),
+  openBackupFolder: () => ipcRenderer.invoke('backup:openFolder'),
+  getSecurityState: () => ipcRenderer.invoke('security:state'),
+  setIdleLock: (minutes) => ipcRenderer.invoke('security:setIdle', minutes),
+  listTrash: () => ipcRenderer.invoke('app:trash'),
+  restoreApp: (id) => ipcRenderer.invoke('app:restore', id),
+  changeMasterPassword: (oldPassword, nextPassword) =>
+    ipcRenderer.invoke('vault:changeMasterPassword', oldPassword, nextPassword),
+  importBrowser: () => ipcRenderer.invoke('vault:importBrowser'),
+  contextMenu: (options) => ipcRenderer.invoke('app:contextMenu', options),
+  openWebsite: (url) => ipcRenderer.invoke('app:openWebsite', url),
+  getTotpCode: (id) => ipcRenderer.invoke('app:totp', id),
+  checkPasswordBreaches: () => ipcRenderer.invoke('app:breachCheck'),
 
   // Authentication
   register: (username, password) => ipcRenderer.invoke('auth:register', username, password),

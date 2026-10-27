@@ -4,7 +4,8 @@ import {
   capturedSite,
   normalizeSiteMetadata,
   websiteAddress,
-  safeIconData
+  safeIconData,
+  DEFAULT_BROWSER_ICON
 } from '../src/shared/site-metadata.js'
 import { filterGroups, groupAccounts, recordWebsiteUrl } from '../src/renderer/src/utils/vault.js'
 
@@ -63,4 +64,22 @@ test('vault icons only accept bounded PNG data, never remote or active SVG conte
   assert.equal(safeIconData('https://example.com/icon.png'), '')
   assert.equal(safeIconData('data:image/svg+xml,<svg onload="alert(1)"/>'), '')
   assert.equal(safeIconData('data:image/png;base64,iVBORw0KGgo' + 'A'.repeat(25000)), '')
+})
+
+test('browser placeholders are missing metadata and cannot hide another account icon', () => {
+  const icon =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+  assert.equal(safeIconData(DEFAULT_BROWSER_ICON), '')
+  assert.equal(
+    capturedSite({ page_url: 'https://example.com', icon_data: DEFAULT_BROWSER_ICON }).icon_data,
+    ''
+  )
+  const records = [DEFAULT_BROWSER_ICON, icon].map((icon_data, id) => ({
+    id,
+    identity: 'example.com',
+    category: 'web',
+    display_name: 'Example',
+    icon_data
+  }))
+  assert.equal(groupAccounts(records)[0].icon_data, icon)
 })

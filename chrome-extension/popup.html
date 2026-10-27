@@ -16,26 +16,35 @@
     </header>
     <main aria-live="polite">
       <section>
-        <h2>扩展更新</h2>
-        <p id="extension-update">正在检查版本…</p>
+        <h1>当前网站账号</h1>
+        <p id="site-name" class="muted"></p>
+        <div id="accounts">正在读取…</div>
       </section>
       <section>
-        <h1>桌面连接</h1>
-        <p id="connection">正在检查…</p>
-      </section>
-      <section>
-        <h2>当前网页</h2>
-        <p id="page">正在检查…</p>
-      </section>
-      <section>
-        <h2>最近一次登录</h2>
+        <h2>最近一次保存</h2>
         <p id="capture">正在检查…</p>
         <p id="capture-time" class="muted"></p>
       </section>
-      <p class="hint">在登录输入框按 Alt+Shift+L，可进入 LocalPass 账号选择。</p>
-      <p class="hint">保持桌面端已解锁。更新扩展后，请刷新网站登录页，再登录一次。</p>
-      <button id="refresh" type="button">重新检查</button>
+      <details>
+        <summary>连接与诊断</summary>
+        <section>
+          <h2>扩展更新</h2>
+          <p id="extension-update">正在检查版本…</p>
+        </section>
+        <section>
+          <h1>桌面连接</h1>
+          <p id="connection">正在检查…</p>
+        </section>
+        <section>
+          <h2>当前网页</h2>
+          <p id="page">正在检查…</p>
+        </section>
+        <p class="hint">在登录输入框按 Alt+Shift+L，可进入 LocalPass 账号选择。</p>
+        <p class="hint">保持桌面端已解锁。登录或注册成功后会保存账号密码。</p>
+        <button id="refresh" type="button">重新检查</button>
+      </details>
     </main>
+    <script src="bridge-config.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

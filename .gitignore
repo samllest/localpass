@@ -11,3 +11,4 @@ out
 *.db-wal
 *.db-shm
 *.localpass
+/chrome-extension/bridge-config.js

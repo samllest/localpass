@@ -58,6 +58,14 @@ Var LocalPassWasRunning
   ${EndIf}
 !macroend
 
+!macro customUnInstall
+  ; Remove only the startup entry registered by LocalPass for the current user.
+  ${IfNot} ${isUpdated}
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "LocalPass"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "LocalPass"
+  ${EndIf}
+!macroend
+
 !macro customInstall
   ; CHECK_APP_RUNNING has finished: preserve the complete closed SQLite file set.
   ${If} ${FileExists} "$APPDATA\${APP_PACKAGE_NAME}\vaults\system.db"

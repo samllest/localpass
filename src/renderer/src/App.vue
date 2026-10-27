@@ -40,7 +40,19 @@ import AppUpdate from './components/AppUpdate.vue'
 import { initializeUpdates } from './utils/updates'
 
 let stopUpdates
+let stopLocked
+let lastActivitySent = 0
+function recordActivity(event) {
+  if (!event.isTrusted || !unlocked.value || Date.now() - lastActivitySent < 30000) return
+  lastActivitySent = Date.now()
+  window.localpass.recordActivity()
+}
 onMounted(async () => {
+  for (const type of ['pointerdown', 'keydown', 'wheel'])
+    window.addEventListener(type, recordActivity, { capture: true, passive: true })
+  stopLocked = window.localpass.onLocked(() => {
+    unlocked.value = false
+  })
   try {
     unlocked.value = (await window.localpass.getAuthSession()).unlocked
   } finally {
@@ -48,7 +60,12 @@ onMounted(async () => {
   }
   stopUpdates = await initializeUpdates()
 })
-onBeforeUnmount(() => stopUpdates?.())
+onBeforeUnmount(() => {
+  for (const type of ['pointerdown', 'keydown', 'wheel'])
+    window.removeEventListener(type, recordActivity, true)
+  stopUpdates?.()
+  stopLocked?.()
+})
 
 const savedTheme = localStorage.getItem('localpass-theme') || 'light'
 document.documentElement.dataset.theme =

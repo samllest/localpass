@@ -7,7 +7,9 @@ import {
   Tray,
   Menu,
   nativeImage,
-  safeStorage
+  safeStorage,
+  powerMonitor,
+  Notification
 } from 'electron'
 import { join } from 'path'
 import { readFile, stat, writeFile } from 'fs/promises'
@@ -20,19 +22,25 @@ import {
   copyVaultKey,
   restoreVaultKey,
   getVaultInfo,
+  getVaultRevision,
   listApps,
   searchApps,
   createApp,
   updateApp,
   updateCredential,
   deleteApp,
-  clearMasterKey,
   closeVault,
   getHistory,
   exportVaultData,
   importVaultData,
   setMasterPassword,
-  isVaultUnlocked
+  isVaultUnlocked,
+  listTrash,
+  restoreApp,
+  purgeTrash,
+  importBrowserRecords,
+  changeVaultMasterPassword,
+  getTotpCode
 } from './db'
 import { initBridgeServer, closeBridgeServer } from './bridge'
 import { initializeStorage, isolateBrowserSession } from './storage'
@@ -44,6 +52,12 @@ import { autoUpdater } from 'electron-updater'
 import { createUpdateManager } from './updates'
 import { createExtensionUpdateManager } from './extension-updates'
 import { createUpdateSession } from './update-session'
+import { createUnlockSession, IDLE_LOCK_MINUTES } from './unlock-session'
+import { loadBridgeSecret } from './bridge-auth'
+import { createAutomaticBackup } from './automatic-backup'
+import { parseBrowserPasswords } from '../shared/password-import'
+import { checkPasswordBreaches } from './breach-check'
+import { createLaunchAtLogin } from './launch-at-login'
 
 // 兼容从受限环境（注入了宿主 Electron 环境变量的会话）启动：
 // GPU 子进程派生会崩溃（0xC0000005），改为主进程内软件渲染，普通桌面环境无感知差异
@@ -56,6 +70,7 @@ let mainWindow
 let clipboardClearTimer = null
 let currentUsername = null
 let updateSession
+let unlockSession
 let installingUpdate = false
 const hasInstanceLock = acquireSingleInstance(app, () => mainWindow)
 let tray = null
@@ -64,6 +79,33 @@ let updateCheckTimer
 let updateStartupTimer
 let extensionUpdates
 let extensionUpdateTimer
+let bridgeSecret
+let automaticBackup
+let backupTimer
+let idleLockTimer
+let idleLockMinutes = IDLE_LOCK_MINUTES
+const securitySettingsFile = join(app.getPath('userData'), 'security-settings.json')
+
+function lockVault() {
+  unlockSession?.clear()
+  updateSession?.clear()
+  cancelProjectChoices()
+  closeVault()
+  currentUsername = null
+  if (clipboardClearTimer) {
+    clearTimeout(clipboardClearTimer)
+    clipboardClearTimer = null
+    clipboard.clear()
+  }
+  mainWindow?.webContents.send('auth:locked')
+}
+function checkUnlockSession() {
+  if (isVaultUnlocked() && unlockSession?.expired()) lockVault()
+}
+function recordVaultActivity() {
+  checkUnlockSession()
+  return isVaultUnlocked() && Boolean(unlockSession?.touch())
+}
 const closePreferenceFile = join(app.getPath('userData'), 'close-preference.json')
 const closeController = createCloseController({
   app,
@@ -80,6 +122,7 @@ const closeController = createCloseController({
       candidate.setContextMenu(
         Menu.buildFromTemplate([
           { label: '打开 LocalPass', click: showMainWindow },
+          { label: '锁定密码库', click: lockVault },
           { type: 'separator' },
           { label: '退出 LocalPass', click: () => closeController.quit() }
         ])
@@ -132,6 +175,9 @@ function createWindow() {
   const window = mainWindow
   initBridgeServer(window.webContents, {
     chooseAccount: chooseProjectAccount,
+    secret: bridgeSecret,
+    beforeAccess: checkUnlockSession,
+    onActivity: recordVaultActivity,
     extensionStatus: (version) => extensionUpdates?.reportBrowserVersion(version)
   }).catch((error) => {
     console.error('[Bridge] Unable to start browser connection:', error.code || error.message)
@@ -164,28 +210,108 @@ app
     if (!hasInstanceLock) return
     await initializeStorage()
     initSystemDb()
-    updateSession = createUpdateSession({ folder: app.getPath('userData'), safeStorage })
-    const restored = updateSession.restore(
-      (account) =>
-        account && getUpdateAccount(account.username)?.fingerprint === account.fingerprint,
-      (account, key) => {
-        try {
-          initDB(account.dbFilename)
-          restoreVaultKey(key)
-        } catch (error) {
-          closeVault()
-          throw error
-        }
-      }
+    bridgeSecret = await loadBridgeSecret(
+      app.isPackaged ? app.getPath('userData') : join(app.getAppPath(), '.localpass-data')
     )
+    automaticBackup = createAutomaticBackup({
+      directory: join(
+        app.isPackaged ? app.getPath('userData') : join(app.getAppPath(), '.localpass-data'),
+        'recovery',
+        'automatic'
+      ),
+      snapshot: createStorageSnapshot,
+      notify: (message) => {
+        mainWindow?.webContents.send('backup:failed', message)
+        if (Notification.isSupported())
+          new Notification({ title: 'LocalPass 自动备份失败', body: message }).show()
+      }
+    })
+    await automaticBackup.initialize()
+    void automaticBackup.run()
+    backupTimer = setInterval(() => void automaticBackup.run(), 15 * 60 * 1000)
+    setInterval(
+      () => {
+        if (isVaultUnlocked()) purgeTrash()
+      },
+      60 * 60 * 1000
+    ).unref()
+    ipcMain.handle('backup:state', () => automaticBackup.status())
+    ipcMain.handle('backup:openFolder', () => shell.openPath(automaticBackup.status().directory))
+    try {
+      const settings = JSON.parse(await readFile(securitySettingsFile, 'utf8'))
+      if (
+        settings.unlockSessionPolicy === 1 &&
+        [5, 15, 30, 60, IDLE_LOCK_MINUTES].includes(settings.idleLockMinutes)
+      )
+        idleLockMinutes = settings.idleLockMinutes
+    } catch {
+      /* Defaults keep background capture available. */
+    }
+    powerMonitor.on('resume', checkUnlockSession)
+    powerMonitor.on('unlock-screen', checkUnlockSession)
+    idleLockTimer = setInterval(checkUnlockSession, 30000)
+    ipcMain.handle('security:state', () => ({ idleLockMinutes }))
+    ipcMain.handle('security:setIdle', async (_, minutes) => {
+      if (![5, 15, 30, 60, IDLE_LOCK_MINUTES].includes(minutes)) throw new Error('闲置锁定时间无效')
+      await writeFile(
+        securitySettingsFile,
+        JSON.stringify({ idleLockMinutes: minutes, unlockSessionPolicy: 1 }),
+        {
+          mode: 0o600
+        }
+      )
+      idleLockMinutes = minutes
+      return { idleLockMinutes }
+    })
+    updateSession = createUpdateSession({ folder: app.getPath('userData'), safeStorage })
+    unlockSession = createUnlockSession({
+      folder: app.getPath('userData'),
+      safeStorage,
+      idleMinutes: () => idleLockMinutes
+    })
+    const validateAccount = (account) =>
+      account && getUpdateAccount(account.username)?.fingerprint === account.fingerprint
+    const restoreAccount = (account, key) => {
+      try {
+        initDB(account.dbFilename)
+        restoreVaultKey(key)
+      } catch (error) {
+        closeVault()
+        throw error
+      }
+    }
+    const hadSavedSession = unlockSession.hasSavedSession()
+    let restored = unlockSession.restore(validateAccount, restoreAccount)
+    // Accept the old installer-only handoff once when upgrading from an older
+    // release, but never let it bypass an expired or revoked remembered session.
+    if (!restored && !hadSavedSession) {
+      restored = updateSession.restore(validateAccount, restoreAccount)
+      if (restored) unlockSession.remember(restored, copyVaultKey())
+    }
+    if (!restored) updateSession.clear()
     currentUsername = restored?.username || null
-    ipcMain.handle('auth:session', () => ({ unlocked: isVaultUnlocked() }))
+    ipcMain.handle('auth:session', () => {
+      checkUnlockSession()
+      return { unlocked: isVaultUnlocked() }
+    })
+    ipcMain.on('auth:activity', (event) => {
+      if (event.sender === mainWindow?.webContents) recordVaultActivity()
+    })
+    const launchAtLogin = createLaunchAtLogin({ app })
+    ipcMain.handle('startup:state', () => launchAtLogin.getState())
+    ipcMain.handle('startup:setEnabled', (_event, enabled) => launchAtLogin.setEnabled(enabled))
 
     function rememberUpdateSession() {
       if (isVaultUnlocked() && currentUsername) {
         updateSession.remember(getUpdateAccount(currentUsername), copyVaultKey())
       }
     }
+    function rememberUnlockedSession() {
+      rememberUpdateSession()
+      if (isVaultUnlocked() && currentUsername)
+        unlockSession.remember(getUpdateAccount(currentUsername), copyVaultKey())
+    }
+    if (restored) rememberUpdateSession()
 
     updates = createUpdateManager({
       updater: autoUpdater,
@@ -227,6 +353,7 @@ app
     ipcMain.handle('updates:install', () => updates.install())
     ipcMain.handle('updates:setServer', (_event, url) => updates.setServer(url))
     extensionUpdates = createExtensionUpdateManager({
+      bridgeSecret,
       sourceFolder: app.isPackaged
         ? join(process.resourcesPath, 'chrome-extension')
         : join(app.getAppPath(), 'chrome-extension'),
@@ -274,7 +401,7 @@ app
       })
       if (res.success) {
         currentUsername = res.username
-        rememberUpdateSession()
+        rememberUnlockedSession()
       }
       return res
     })
@@ -285,8 +412,9 @@ app
         try {
           initDB(res.dbFilename)
           setMasterPassword(password, res.salt)
+          purgeTrash()
           currentUsername = res.username
-          rememberUpdateSession()
+          rememberUnlockedSession()
         } catch (error) {
           closeVault()
           currentUsername = null
@@ -303,6 +431,98 @@ app
     ipcMain.handle('app:updateCredential', (_, data) => updateCredential(data))
     ipcMain.handle('app:delete', (_, id) => deleteApp(id))
     ipcMain.handle('app:history', (_, id) => getHistory(id))
+    ipcMain.handle('app:trash', () => listTrash())
+    ipcMain.handle('app:restore', (_, id) => restoreApp(id))
+    ipcMain.handle('app:totp', (_, id) => getTotpCode(id))
+    ipcMain.handle('app:breachCheck', async () => {
+      const revision = getVaultRevision()
+      const records = listApps()
+      const fingerprints = JSON.stringify(records.map((record) => [record.id, record.password]))
+      const leaked = await checkPasswordBreaches(records)
+      if (!isVaultUnlocked() || getVaultRevision() !== revision) throw new Error('密码库会话已变化')
+      if (fingerprints !== JSON.stringify(listApps().map((record) => [record.id, record.password]))) throw new Error('密码已变化，请重新检查')
+      return { leaked, checkedAt: new Date().toISOString() }
+    })
+    ipcMain.handle('app:openWebsite', (_, value) => {
+      const url = new URL(value)
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('网站地址无效')
+      return shell.openExternal(url.href)
+    })
+    ipcMain.handle(
+      'app:contextMenu',
+      (event, options) =>
+        new Promise((resolve) => {
+          const items = options?.group
+            ? [
+                ['view', '查看账号'],
+                ['add', '添加账号'],
+                ...(options.website
+                  ? [
+                      ['open', '打开网站'],
+                      ['url', '复制网址']
+                    ]
+                  : [])
+              ]
+            : [
+                ['username', '复制用户名'],
+                ['password', '复制密码'],
+                ['edit', '编辑账号'],
+                ['history', '历史版本'],
+                ['favorite', '收藏 / 取消收藏'],
+                ['delete', '移入回收站']
+              ]
+          const menu = Menu.buildFromTemplate(
+            items.map(([id, label]) => ({ label, click: () => resolve(id) }))
+          )
+          menu.popup({
+            window: BrowserWindow.fromWebContents(event.sender),
+            callback: () => resolve(null)
+          })
+        })
+    )
+    ipcMain.handle('vault:changeMasterPassword', async (_, oldPassword, nextPassword) => {
+      if (!currentUsername || !isVaultUnlocked()) throw new Error('请先解锁密码库')
+      const account = loginUser(currentUsername, oldPassword)
+      if (!account.success) throw new Error(account.error)
+      const revision = getVaultRevision()
+      await automaticBackup.run({ force: true })
+      if (automaticBackup.status().error) throw new Error('修改主密码前备份失败，已停止修改')
+      if (revision !== getVaultRevision()) throw new Error('密码库会话已变化，请重新解锁')
+      closeSystemDb()
+      try {
+        changeVaultMasterPassword(account, nextPassword)
+      } finally {
+        initSystemDb()
+      }
+      updateSession.clear()
+      rememberUnlockedSession()
+      return { success: true }
+    })
+    ipcMain.handle('vault:importBrowser', async () => {
+      if (!isVaultUnlocked()) throw new Error('请先解锁密码库')
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: '导入 Chrome / Edge 密码',
+        properties: ['openFile'],
+        filters: [{ name: '浏览器密码 CSV', extensions: ['csv'] }]
+      })
+      if (result.canceled) return { canceled: true }
+      if ((await stat(result.filePaths[0])).size > 50 * 1024 * 1024) throw new Error('文件过大')
+      const parsed = parseBrowserPasswords(await readFile(result.filePaths[0], 'utf8'))
+      const revision = getVaultRevision()
+      const confirm = await dialog.showMessageBox(mainWindow, {
+        type: 'question',
+        message: `导入 ${parsed.records.length} 个账号？`,
+        detail: '相同账号密码自动跳过；密码不同则保留为独立记录。',
+        buttons: ['取消', '导入'],
+        cancelId: 0,
+        defaultId: 1
+      })
+      if (confirm.response !== 1) return { canceled: true }
+      if (!isVaultUnlocked() || revision !== getVaultRevision()) throw new Error('密码库会话已变化')
+      const imported = importBrowserRecords(parsed.records)
+      mainWindow?.webContents.send('app:refreshList')
+      return { ...imported, skipped: parsed.skipped }
+    })
     ipcMain.handle('vault:info', () => ({ ...getVaultInfo(), username: currentUsername }))
     ipcMain.handle('vault:openFolder', () => {
       shell.showItemInFolder(getVaultInfo().dbPath)
@@ -348,6 +568,7 @@ app
       return { canceled: false, imported }
     })
     ipcMain.handle('app:copy', (_, text) => {
+      if (!isVaultUnlocked()) throw new Error('请先解锁密码库')
       const copiedText = text == null ? '' : String(text)
       clipboard.writeText(copiedText)
 
@@ -366,11 +587,7 @@ app
       return true
     })
     ipcMain.handle('app:clearMasterKey', () => {
-      updateSession.clear()
-      cancelProjectChoices()
-      clearMasterKey()
-      closeVault()
-      currentUsername = null
+      lockVault()
     })
 
     ipcMain.on('window:minimize', () => {
@@ -406,6 +623,8 @@ app.on('before-quit', () => {
   clearTimeout(updateStartupTimer)
   clearInterval(updateCheckTimer)
   clearInterval(extensionUpdateTimer)
+  clearInterval(backupTimer)
+  clearInterval(idleLockTimer)
   cancelProjectChoices()
   closeController.allowQuit()
   tray?.destroy()
